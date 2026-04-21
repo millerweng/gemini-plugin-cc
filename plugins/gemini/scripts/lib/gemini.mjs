@@ -338,7 +338,8 @@ async function applySessionControls(client, sessionId, options = {}) {
       .catch((err) => warn("yolo", err));
   }
   if (options.effort && EFFORT_TO_THINKING_LEVEL.has(options.effort)) {
-    // Gemini ACP has no public thinkingLevel RPC yet; rely on the model default.
+    // Pending upstream ACP support — thinkingLevel control is not yet exposed.
+    // The plumbing stays intact so we can enable it when the RPC lands.
   }
 }
 
@@ -463,9 +464,11 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
       loggedIn = fs.existsSync(credsFile);
       break;
     }
-    case "gateway":
-      loggedIn = true;
+    case "gateway": {
+      const gatewayConfig = settings?.security?.auth?.gateway;
+      loggedIn = Boolean(gatewayConfig && typeof gatewayConfig === "object" && Object.keys(gatewayConfig).length > 0);
       break;
+    }
     default:
       loggedIn = false;
   }
@@ -476,9 +479,44 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
     detail: describeAuthType(selectedType, env),
     source: "settings",
     authMethod: selectedType,
-    verified: loggedIn,
+    verified: null,
     provider: selectedType
   };
+}
+
+export async function verifyGeminiConnectivity(cwd, options = {}) {
+  const { spawnSync } = await import("node:child_process");
+  const timeout = options.timeout ?? 10000;
+
+  const result = spawnSync("gemini", ["--acp"], {
+    cwd,
+    input: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } }) + "\n",
+    encoding: "utf8",
+    timeout,
+    env: { ...process.env, ...(options.env ?? {}) }
+  });
+
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr?.trim() ?? "gemini --acp failed";
+    return { verified: false, detail };
+  }
+
+  const lines = (result.stdout ?? "").split("\n").filter(Boolean);
+  for (const line of lines) {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.id === 1 && msg.result) {
+        return { verified: true, detail: "ACP connectivity confirmed" };
+      }
+      if (msg.id === 1 && msg.error) {
+        return { verified: false, detail: msg.error.message ?? "ACP initialization rejected" };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { verified: false, detail: "No valid ACP response received" };
 }
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {

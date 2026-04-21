@@ -42,7 +42,7 @@ Operating rules:
 - Return the Gemini companion stdout verbatim to the user.
 - Do not paraphrase, summarize, rewrite, or add commentary before or after it.
 - Do not ask the subagent to inspect files, monitor progress, poll `/gemini:status`, fetch `/gemini:result`, call `/gemini:cancel`, summarize output, or do follow-up work of its own.
-- Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort.
+- Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort. Note: the flag is accepted but has no effect yet (pending upstream ACP support for thinkingLevel).
 - Leave the model unset unless the user explicitly asks for one. Accept Gemini model aliases: `pro`, `pro-3`, `flash`, `flash-lite`, `2.5-pro`, `auto`. Pass concrete model IDs through unchanged.
 - `--plan` maps to Gemini's `--approval-mode plan` (read-only planning run). Without `--plan`, the companion defaults to `--yolo --sandbox` (macOS Seatbelt).
 - `--worktree <path>` maps to Gemini's `-w <path>` (run in the given worktree).

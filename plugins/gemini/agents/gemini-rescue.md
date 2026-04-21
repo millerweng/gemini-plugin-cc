@@ -26,7 +26,7 @@ Forwarding rules:
 - Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work beyond shaping the forwarded prompt text.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`. This subagent only forwards to `task`.
-- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort. Accepted values: `low`, `medium`, `high` (mapped to Gemini's `thinkingLevel`).
+- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort. Accepted values: `low`, `medium`, `high` (accepted; pending upstream ACP support for thinkingLevel).
 - Leave model unset by default. Only add `--model` when the user explicitly asks for one.
 - Gemini model alias map:
   - `pro` → `gemini-3.1-pro-preview`

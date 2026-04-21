@@ -18,7 +18,8 @@ import {
   parseStructuredOutput,
   readOutputSchema,
   runAcpReview,
-  runAcpTurn
+  runAcpTurn,
+  verifyGeminiConnectivity
 } from "./lib/gemini.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
@@ -213,7 +214,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
-    booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
+    booleanOptions: ["json", "verify", "enable-review-gate", "disable-review-gate"]
   });
 
   if (options["enable-review-gate"] && options["disable-review-gate"]) {
@@ -233,6 +234,18 @@ async function handleSetup(argv) {
   }
 
   const finalReport = await buildSetupReport(cwd, actionsTaken);
+
+  if (options.verify && finalReport.gemini.available) {
+    const connectivity = await verifyGeminiConnectivity(cwd);
+    finalReport.auth.verified = connectivity.verified;
+    finalReport.auth.verifyDetail = connectivity.detail;
+  }
+
+  if (!options.verify && finalReport.auth.loggedIn && finalReport.auth.verified === null) {
+    finalReport.nextSteps = finalReport.nextSteps ?? [];
+    finalReport.nextSteps.push("Run with --verify to confirm credentials work end-to-end.");
+  }
+
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
@@ -708,6 +721,11 @@ async function handleTask(argv) {
   const workspaceRoot = resolveCommandWorkspace(options);
   const model = normalizeRequestedModel(options.model);
   const effort = normalizeReasoningEffort(options.effort);
+  if (effort) {
+    process.stderr.write(
+      `[gemini] --effort ${effort} accepted but has no effect yet (Gemini ACP does not expose thinkingLevel control).\n`
+    );
+  }
   const prompt = readTaskPrompt(cwd, options, positionals);
 
   const resumeLast = Boolean(options["resume-last"] || options.resume);

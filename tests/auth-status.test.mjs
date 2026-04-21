@@ -4,11 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { makeTempDir, writeExecutable } from "./helpers.mjs";
 
 const SCRIPT = path.resolve(
-  import.meta.dirname,
+  path.dirname(fileURLToPath(import.meta.url)),
   "../plugins/gemini/scripts/lib/gemini.mjs"
 );
 
@@ -92,8 +93,41 @@ test("vertex-ai accepts GCLOUD_PROJECT as a fallback for project", () => {
   assert.equal(result.loggedIn, true);
 });
 
-test("gateway reports loggedIn unconditionally", () => {
+test("gateway reports NOT loggedIn when no gateway sub-config exists", () => {
   const result = runAuthProbe({ _AUTH_TYPE: "gateway" });
+  assert.equal(result.loggedIn, false);
+  assert.equal(result.authMethod, "gateway");
+});
+
+test("gateway reports loggedIn when gateway sub-config is present", () => {
+  const tmpHome = makeTempDir("auth-test-gw-");
+  const binDir = path.join(tmpHome, "bin");
+  fs.mkdirSync(binDir);
+  writeExecutable(path.join(binDir, "gemini"), '#!/bin/sh\necho "1.0.0"');
+
+  const settingsDir = path.join(tmpHome, ".gemini");
+  fs.mkdirSync(settingsDir);
+  fs.writeFileSync(
+    path.join(settingsDir, "settings.json"),
+    JSON.stringify({ security: { auth: { selectedType: "gateway", gateway: { endpoint: "https://gw.example.com" } } } })
+  );
+
+  const wrapper = [
+    `import { getGeminiAuthStatus } from ${JSON.stringify(SCRIPT)};`,
+    `const result = await getGeminiAuthStatus(process.cwd(), { env: process.env });`,
+    `process.stdout.write(JSON.stringify({ loggedIn: result.loggedIn, authMethod: result.authMethod }));`
+  ].join("\n");
+  const wrapperFile = path.join(tmpHome, "probe.mjs");
+  fs.writeFileSync(wrapperFile, wrapper);
+
+  const { stdout } = spawnSync(process.execPath, [wrapperFile], {
+    cwd: tmpHome,
+    env: { HOME: tmpHome, PATH: `${binDir}:${process.env.PATH}`, NODE_NO_WARNINGS: "1" },
+    encoding: "utf8",
+    timeout: 5000
+  });
+
+  const result = stdout ? JSON.parse(stdout) : {};
   assert.equal(result.loggedIn, true);
   assert.equal(result.authMethod, "gateway");
 });

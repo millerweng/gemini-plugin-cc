@@ -38,7 +38,7 @@ function appendEnvVar(name, value) {
   fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export ${name}=${shellEscape(value)}\n`, "utf8");
 }
 
-function cleanupSessionJobs(cwd, sessionId) {
+export function cleanupSessionJobs(cwd, sessionId) {
   if (!cwd || !sessionId) {
     return;
   }
@@ -50,16 +50,14 @@ function cleanupSessionJobs(cwd, sessionId) {
   }
 
   const state = loadState(workspaceRoot);
-  const removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
-  if (removedJobs.length === 0) {
+  const activeJobs = state.jobs.filter(
+    (job) => job.sessionId === sessionId && (job.status === "queued" || job.status === "running")
+  );
+  if (activeJobs.length === 0) {
     return;
   }
 
-  for (const job of removedJobs) {
-    const stillRunning = job.status === "queued" || job.status === "running";
-    if (!stillRunning) {
-      continue;
-    }
+  for (const job of activeJobs) {
     try {
       terminateProcessTree(job.pid ?? Number.NaN);
     } catch {
@@ -67,9 +65,10 @@ function cleanupSessionJobs(cwd, sessionId) {
     }
   }
 
+  const killedIds = new Set(activeJobs.map((j) => j.id));
   saveState(workspaceRoot, {
     ...state,
-    jobs: state.jobs.filter((job) => job.sessionId !== sessionId)
+    jobs: state.jobs.filter((job) => !killedIds.has(job.id))
   });
 }
 
@@ -125,7 +124,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+const isDirectExecution = !process.env.__GEMINI_HOOK_IMPORT_ONLY;
+if (isDirectExecution) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+}

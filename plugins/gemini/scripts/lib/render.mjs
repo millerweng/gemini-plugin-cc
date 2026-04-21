@@ -184,7 +184,7 @@ export function renderSetupReport(report) {
     `- node: ${report.node.detail}`,
     `- npm: ${report.npm.detail}`,
     `- gemini: ${report.gemini.detail}`,
-    `- auth: ${report.auth.detail}`,
+    `- auth: ${report.auth.detail}${report.auth.verified === true ? " (verified)" : report.auth.verified === false ? " (verification failed)" : " (unverified)"}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     ""

@@ -92,7 +92,7 @@ Delegates code investigation, fixes, or diagnosis to Gemini. For exploratory or 
 | `--resume` | Continue from the last Gemini thread in this repository |
 | `--fresh` | Start a new Gemini thread (ignore any prior session) |
 | `--model <alias>` | Choose a specific Gemini model (see model aliases below) |
-| `--effort low\|medium\|high` | Set Gemini's thinking level |
+| `--effort low\|medium\|high` | Set Gemini's thinking level (accepted; pending upstream ACP support) |
 | `--plan` | Read-only planning run (Gemini proposes but does not execute) |
 | `--worktree <path>` | Run Gemini in a specific worktree directory |
 
@@ -127,7 +127,7 @@ Concrete model IDs are also accepted (e.g., `--model gemini-3-pro-preview`).
 
 General-purpose delegation: research, writing, analysis, brainstorming, explanation, or anything else. Unlike `/gemini:rescue`, this command does not nudge Gemini toward code investigation -- the task may not involve code at all.
 
-**Flags:** same as `/gemini:rescue` (`--background`, `--wait`, `--resume`, `--fresh`, `--model`, `--effort`, `--plan`, `--worktree`).
+**Flags:** same as `/gemini:rescue` (`--background`, `--wait`, `--resume`, `--fresh`, `--model`, `--effort` (pending upstream support), `--plan`, `--worktree`).
 
 **Examples:**
 
@@ -194,7 +194,7 @@ Accepts an optional job ID. Defaults to the latest active job.
 
 ### `/gemini:setup`
 
-Checks Gemini CLI availability and authentication status. Reports the detected auth method (OAuth, API key, Vertex AI, gateway) and whether credentials are valid.
+Checks Gemini CLI availability and authentication status. Reports the detected auth method (OAuth, API key, Vertex AI, gateway) and whether credentials are present locally. Use `--verify` to confirm credentials work end-to-end.
 
 If the Gemini CLI is not installed and npm is available, offers to install it via `npm install -g @google/gemini-cli`.
 
@@ -202,6 +202,7 @@ If the Gemini CLI is not installed and npm is available, offers to install it vi
 
 | Flag | Description |
 |---|---|
+| `--verify` | Confirm credentials work end-to-end via ACP handshake (requires Gemini CLI) |
 | `--enable-review-gate` | Enable the stop-time review gate (Gemini reviews Claude's work before stopping) |
 | `--disable-review-gate` | Disable the stop-time review gate |
 

@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { makeTempDir } from "./helpers.mjs";
 import { saveState, resolveStateDir } from "../plugins/gemini/scripts/lib/state.mjs";
 
 const HOOK_SCRIPT = path.resolve(
-  import.meta.dirname,
+  path.dirname(fileURLToPath(import.meta.url)),
   "../plugins/gemini/scripts/stop-review-gate-hook.mjs"
 );
 
@@ -47,7 +48,7 @@ function runHook(workspace, { gateEnabled = false, geminiAvailable = false } = {
       HOME: workspace,
       PATH: envPath,
       NODE_NO_WARNINGS: "1",
-      CLAUDE_PLUGIN_ROOT: path.resolve(import.meta.dirname, "../plugins/gemini"),
+      CLAUDE_PLUGIN_ROOT: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugins/gemini"),
       CLAUDE_PLUGIN_DATA: pluginDataDir
     },
     encoding: "utf8",
