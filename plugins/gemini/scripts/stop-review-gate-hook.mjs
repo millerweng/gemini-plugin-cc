@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { getGeminiAvailability, getGeminiAuthStatus, cleanGeminiStderr } from "./lib/gemini.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
-import { getConfig, setConfig, listJobs } from "./lib/state.mjs";
+import { getConfig, listJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
 import { SESSION_ID_ENV } from "./lib/tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -210,8 +210,6 @@ function runStopReview(cwd, input = {}) {
   }
 }
 
-const SOFT_FAIL_THRESHOLD = 3;
-
 async function main() {
   const input = readHookInput();
   const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -242,16 +240,6 @@ async function main() {
 
   const review = runStopReview(cwd, input);
   if (!review.ok) {
-    const failCount = (config.gateConsecutiveFailures ?? 0) + 1;
-    setConfig(workspaceRoot, "gateConsecutiveFailures", failCount);
-
-    if (failCount >= SOFT_FAIL_THRESHOLD) {
-      logNote(`[gemini] Review gate has failed ${failCount} times in a row. Degrading to warning: ${review.reason}`);
-      setConfig(workspaceRoot, "gateConsecutiveFailures", 0);
-      logNote(runningTaskNote);
-      return;
-    }
-
     emitDecision({
       decision: "block",
       reason: runningTaskNote ? `${runningTaskNote} ${review.reason}` : review.reason
@@ -259,9 +247,6 @@ async function main() {
     return;
   }
 
-  if ((config.gateConsecutiveFailures ?? 0) > 0) {
-    setConfig(workspaceRoot, "gateConsecutiveFailures", 0);
-  }
   logNote(runningTaskNote);
 }
 

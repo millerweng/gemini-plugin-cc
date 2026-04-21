@@ -196,7 +196,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     }
   }
   if (!config.stopReviewGate) {
-    nextSteps.push("Optional: run `/gemini:setup --enable-review-gate` to require a fresh review before stop.");
+    nextSteps.push("Optional: run `/gemini:setup --enable-review-gate` to block stops until Gemini reviews the work.");
   }
 
   return {

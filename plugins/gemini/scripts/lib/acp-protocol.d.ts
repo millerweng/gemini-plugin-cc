@@ -16,9 +16,15 @@ export interface ClientCapabilities {
   fs?: ClientFsCapabilities;
 }
 
+export interface ClientInfo {
+  name: string;
+  version?: string;
+}
+
 export interface InitializeParams {
   protocolVersion: ProtocolVersion;
   clientCapabilities?: ClientCapabilities;
+  clientInfo?: ClientInfo;
 }
 
 export interface AuthMethodMeta {

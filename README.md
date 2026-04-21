@@ -206,7 +206,7 @@ If the Gemini CLI is not installed and npm is available, offers to install it vi
 | `--enable-review-gate` | Enable the stop-time review gate (Gemini reviews Claude's work before stopping) |
 | `--disable-review-gate` | Disable the stop-time review gate |
 
-The review gate is a `Stop` hook that triggers a Gemini review of Claude's changes each time Claude is about to finish. This gives you an automatic second opinion on every piece of work.
+The review gate is a `Stop` hook that blocks Claude from finishing until Gemini has reviewed the work. When the gate cannot reach Gemini (auth failure, network issue), it blocks and surfaces actionable guidance rather than silently allowing the stop. Disable with `--disable-review-gate` if the block is not resolvable in the current session.
 
 **Examples:**
 
@@ -281,7 +281,7 @@ The plugin starts a shared ACP broker session so multiple commands reuse a singl
 
 ### Session persistence and timeouts
 
-Task sessions are indexed in `.gemini-task-sessions.json` in the repository root, enabling the `--resume` flag to continue from a prior thread (up to 20 recent sessions are retained).
+Task sessions are indexed in the plugin's state directory (outside the working tree), enabling the `--resume` flag to continue from a prior thread (up to 20 recent sessions are retained).
 
 The default task turn timeout is 30 minutes. Override with `GEMINI_TASK_TIMEOUT_MS`:
 

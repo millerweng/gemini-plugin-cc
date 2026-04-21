@@ -18,6 +18,7 @@ import {
 } from "./acp-client.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
+import { resolveStateDir } from "./state.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const TASK_SESSION_PREFIX = "Gemini Companion Task";
@@ -323,24 +324,28 @@ async function loadSession(client, sessionId, cwd, options = {}) {
 }
 
 async function applySessionControls(client, sessionId, options = {}) {
-  const warn = (modeId, err) => {
-    const detail = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `[gemini] setSessionMode(${modeId}) failed for session ${sessionId}: ${detail}\n`
-    );
-  };
   if (options.sandbox === "read-only" || options.approvalMode === "plan") {
-    await client
-      .request(ACP_METHODS.setSessionMode, { sessionId, modeId: "plan" })
-      .catch((err) => warn("plan", err));
+    try {
+      await client.request(ACP_METHODS.setSessionMode, { sessionId, modeId: "plan" });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Cannot enforce read-only/plan mode for session ${sessionId}: ${detail}. ` +
+        `Aborting to prevent unintended writes.`
+      );
+    }
   } else if (options.approvalMode === "yolo" || options.sandbox === "workspace-write") {
     await client
       .request(ACP_METHODS.setSessionMode, { sessionId, modeId: "yolo" })
-      .catch((err) => warn("yolo", err));
+      .catch((err) => {
+        const detail = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[gemini] setSessionMode(yolo) failed for session ${sessionId}: ${detail}\n`
+        );
+      });
   }
   if (options.effort && EFFORT_TO_THINKING_LEVEL.has(options.effort)) {
     // Pending upstream ACP support — thinkingLevel control is not yet exposed.
-    // The plumbing stays intact so we can enable it when the RPC lands.
   }
 }
 
@@ -513,12 +518,23 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
 }
 
 export async function verifyGeminiConnectivity(cwd, options = {}) {
+  const authStatus = await getGeminiAuthStatus(cwd, options);
+  if (!authStatus.loggedIn) {
+    return { verified: false, detail: `Auth check failed: ${authStatus.detail}` };
+  }
+
   const { spawnSync } = await import("node:child_process");
-  const timeout = options.timeout ?? 10000;
+  const timeout = options.timeout ?? 15000;
+
+  // Send initialize + session/new to actually exercise the auth path.
+  const requests = [
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } }),
+    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd } })
+  ].join("\n") + "\n";
 
   const result = spawnSync("gemini", ["--acp"], {
     cwd,
-    input: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } }) + "\n",
+    input: requests,
     encoding: "utf8",
     timeout,
     env: { ...process.env, ...(options.env ?? {}) }
@@ -530,20 +546,30 @@ export async function verifyGeminiConnectivity(cwd, options = {}) {
   }
 
   const lines = (result.stdout ?? "").split("\n").filter(Boolean);
+  let initOk = false;
   for (const line of lines) {
     try {
       const msg = JSON.parse(line);
       if (msg.id === 1 && msg.result) {
-        return { verified: true, detail: "ACP connectivity confirmed" };
+        initOk = true;
       }
       if (msg.id === 1 && msg.error) {
         return { verified: false, detail: msg.error.message ?? "ACP initialization rejected" };
+      }
+      if (msg.id === 2 && msg.result?.sessionId) {
+        return { verified: true, detail: "ACP session created successfully" };
+      }
+      if (msg.id === 2 && msg.error) {
+        return { verified: false, detail: msg.error.message ?? "Session creation failed (auth may be invalid)" };
       }
     } catch {
       continue;
     }
   }
 
+  if (initOk) {
+    return { verified: false, detail: "ACP initialized but session creation got no response" };
+  }
   return { verified: false, detail: "No valid ACP response received" };
 }
 
@@ -602,7 +628,9 @@ export async function interruptAcpTurn(cwd, { sessionId }) {
 }
 
 function resolveSessionIndexPath(cwd) {
-  return path.join(cwd, TASK_SESSION_INDEX_FILE);
+  const stateDir = resolveStateDir(cwd);
+  fs.mkdirSync(stateDir, { recursive: true });
+  return path.join(stateDir, TASK_SESSION_INDEX_FILE);
 }
 
 function readSessionIndex(cwd) {
