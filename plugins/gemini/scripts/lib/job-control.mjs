@@ -306,3 +306,28 @@ export function resolveCancelableJob(cwd, reference, options = {}) {
 
   throw new Error("No active Gemini jobs to cancel.");
 }
+
+export function resolveWaitTargetJob(cwd, options = {}) {
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
+  const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "running");
+
+  const scopedActiveJobs = options.all
+    ? activeJobs
+    : filterJobsForCurrentSession(activeJobs, options);
+
+  if (scopedActiveJobs.length === 1) {
+    return { workspaceRoot, job: scopedActiveJobs[0] };
+  }
+  if (scopedActiveJobs.length > 1) {
+    throw new Error("Multiple Gemini jobs are active. Pass a job ID to `status --wait`.");
+  }
+
+  if (options.all) {
+    throw new Error("No active Gemini jobs to wait on.");
+  }
+  if (getCurrentSessionId(options)) {
+    throw new Error("No active Gemini jobs to wait on for this session. Use `--all` to include other sessions.");
+  }
+  throw new Error("No active Gemini jobs to wait on.");
+}

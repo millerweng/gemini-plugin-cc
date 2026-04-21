@@ -6,9 +6,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { getGeminiAvailability } from "./lib/gemini.mjs";
+import { getGeminiAvailability, getGeminiAuthStatus, cleanGeminiStderr } from "./lib/gemini.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
-import { getConfig, listJobs } from "./lib/state.mjs";
+import { getConfig, setConfig, listJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
 import { SESSION_ID_ENV } from "./lib/tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -56,14 +56,82 @@ function buildStopReviewPrompt(input = {}) {
   });
 }
 
-function buildSetupNote(cwd) {
+async function buildSetupNote(cwd) {
   const availability = getGeminiAvailability(cwd);
-  if (availability.available) {
-    return null;
+  if (!availability.available) {
+    const detail = availability.detail ? ` ${availability.detail}.` : "";
+    return `Gemini is not set up for the review gate.${detail} Run /gemini:setup.`;
   }
 
-  const detail = availability.detail ? ` ${availability.detail}.` : "";
-  return `Gemini is not set up for the review gate.${detail} Run /gemini:setup.`;
+  const auth = await getGeminiAuthStatus(cwd);
+  if (!auth.loggedIn) {
+    const guidance = auth.authMethod
+      ? `Auth type "${auth.authMethod}" is configured but credentials are missing or expired.`
+      : "No auth type is configured.";
+    return `Gemini review gate cannot run: ${guidance} ${auth.detail ?? ""} Run /gemini:setup or set GEMINI_API_KEY.`.trim();
+  }
+
+  return null;
+}
+
+function sanitizeErrorDetail(rawDetail) {
+  let text = cleanGeminiStderr(rawDetail);
+
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed?.message === "string") {
+      text = parsed.message;
+    } else if (typeof parsed?.error?.message === "string") {
+      text = parsed.error.message;
+    }
+  } catch {
+    // Not JSON, use as-is
+  }
+
+  text = text
+    .split(/\r?\n/)
+    .filter((line) => !line.match(/^\s+at /))
+    .join("\n")
+    .trim();
+
+  if (text.length > 300) {
+    text = text.slice(0, 297) + "...";
+  }
+
+  return text;
+}
+
+function classifyFailure(detail) {
+  const lower = detail.toLowerCase();
+  if (lower.includes("token") && (lower.includes("expired") || lower.includes("invalid"))) {
+    return "oauth-expired";
+  }
+  if (lower.includes("oauth") && (lower.includes("refresh") || lower.includes("expired"))) {
+    return "oauth-expired";
+  }
+  if (lower.includes("econnrefused") || lower.includes("connection refused")) {
+    return "connection-refused";
+  }
+  if (lower.includes("enotfound") || lower.includes("getaddrinfo")) {
+    return "dns-failure";
+  }
+  if (lower.includes("401") || lower.includes("unauthorized")) {
+    return "auth-rejected";
+  }
+  return "generic";
+}
+
+function buildFailureGuidance(classification) {
+  switch (classification) {
+    case "oauth-expired":
+    case "auth-rejected":
+      return "Re-authenticate with `!gemini` or set GEMINI_API_KEY.";
+    case "connection-refused":
+    case "dns-failure":
+      return "Check network connectivity or gateway configuration.";
+    default:
+      return "Run /gemini:review --wait manually or bypass the gate.";
+  }
 }
 
 function parseStopReviewOutput(rawOutput) {
@@ -118,12 +186,15 @@ function runStopReview(cwd, input = {}) {
   }
 
   if (result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || "").trim();
+    const rawDetail = String(result.stderr || result.stdout || "").trim();
+    const sanitized = sanitizeErrorDetail(rawDetail);
+    const classification = classifyFailure(sanitized);
+    const guidance = buildFailureGuidance(classification);
     return {
       ok: false,
-      reason: detail
-        ? `The stop-time Gemini review task failed: ${detail}`
-        : "The stop-time Gemini review task failed. Run /gemini:review --wait manually or bypass the gate."
+      reason: sanitized
+        ? `The stop-time Gemini review task failed: ${sanitized}. ${guidance}`
+        : `The stop-time Gemini review task failed. ${guidance}`
     };
   }
 
@@ -139,7 +210,9 @@ function runStopReview(cwd, input = {}) {
   }
 }
 
-function main() {
+const SOFT_FAIL_THRESHOLD = 3;
+
+async function main() {
   const input = readHookInput();
   const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
@@ -156,7 +229,7 @@ function main() {
     return;
   }
 
-  const setupNote = buildSetupNote(cwd);
+  const setupNote = await buildSetupNote(cwd);
   if (setupNote) {
     const parts = [setupNote];
     if (runningTaskNote) parts.push(runningTaskNote);
@@ -169,6 +242,16 @@ function main() {
 
   const review = runStopReview(cwd, input);
   if (!review.ok) {
+    const failCount = (config.gateConsecutiveFailures ?? 0) + 1;
+    setConfig(workspaceRoot, "gateConsecutiveFailures", failCount);
+
+    if (failCount >= SOFT_FAIL_THRESHOLD) {
+      logNote(`[gemini] Review gate has failed ${failCount} times in a row. Degrading to warning: ${review.reason}`);
+      setConfig(workspaceRoot, "gateConsecutiveFailures", 0);
+      logNote(runningTaskNote);
+      return;
+    }
+
     emitDecision({
       decision: "block",
       reason: runningTaskNote ? `${runningTaskNote} ${review.reason}` : review.reason
@@ -176,13 +259,14 @@ function main() {
     return;
   }
 
+  if ((config.gateConsecutiveFailures ?? 0) > 0) {
+    setConfig(workspaceRoot, "gateConsecutiveFailures", 0);
+  }
   logNote(runningTaskNote);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
-}
+});

@@ -144,3 +144,47 @@ test("gemini-api-key reports NOT loggedIn when GEMINI_API_KEY is missing", () =>
   const result = runAuthProbe({ _AUTH_TYPE: "gemini-api-key" });
   assert.equal(result.loggedIn, false);
 });
+
+test("project-scoped settings are discovered when user-level settings are absent", () => {
+  const tmpHome = makeTempDir("auth-proj-");
+  const tmpProject = makeTempDir("auth-proj-cwd-");
+  const binDir = path.join(tmpHome, "bin");
+  fs.mkdirSync(binDir);
+  writeExecutable(path.join(binDir, "gemini"), '#!/bin/sh\necho "1.0.0"');
+
+  // No user-level settings at tmpHome/.gemini/settings.json
+  // Project-scoped settings at tmpProject/.gemini/settings.json
+  const projectSettingsDir = path.join(tmpProject, ".gemini");
+  fs.mkdirSync(projectSettingsDir);
+  fs.writeFileSync(
+    path.join(projectSettingsDir, "settings.json"),
+    JSON.stringify({ security: { auth: { selectedType: "gemini-api-key" } } })
+  );
+
+  // Make tmpProject a git repo so resolveWorkspaceRoot finds it
+  spawnSync("git", ["init"], { cwd: tmpProject });
+
+  const wrapper = [
+    `import { getGeminiAuthStatus } from ${JSON.stringify(SCRIPT)};`,
+    `const result = await getGeminiAuthStatus(process.cwd(), { env: process.env });`,
+    `process.stdout.write(JSON.stringify({ loggedIn: result.loggedIn, authMethod: result.authMethod }));`
+  ].join("\n");
+  const wrapperFile = path.join(tmpProject, "probe.mjs");
+  fs.writeFileSync(wrapperFile, wrapper);
+
+  const { stdout } = spawnSync(process.execPath, [wrapperFile], {
+    cwd: tmpProject,
+    env: {
+      HOME: tmpHome,
+      PATH: `${binDir}:${process.env.PATH}`,
+      NODE_NO_WARNINGS: "1",
+      GEMINI_API_KEY: "project-key-abc"
+    },
+    encoding: "utf8",
+    timeout: 5000
+  });
+
+  const result = stdout ? JSON.parse(stdout) : {};
+  assert.equal(result.loggedIn, true);
+  assert.equal(result.authMethod, "gemini-api-key");
+});

@@ -39,6 +39,7 @@ import {
   readStoredJob,
   resolveCancelableJob,
   resolveResultJob,
+  resolveWaitTargetJob,
   sortJobsNewestFirst
 } from "./lib/job-control.mjs";
 import {
@@ -189,7 +190,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     nextSteps.push("Install Gemini CLI with `npm install -g @google/gemini-cli`.");
   }
   if (geminiStatus.available && !authStatus.loggedIn) {
-    nextSteps.push("Configure Gemini auth: edit `~/.gemini/settings.json` or launch `!gemini` interactively to pick an auth method.");
+    nextSteps.push("Configure Gemini auth: edit `<repo>/.gemini/settings.json` (project-scoped) or `~/.gemini/settings.json` (user-level), or launch `!gemini` interactively.");
     if (authStatus.authMethod === "vertex-ai") {
       nextSteps.push("For Vertex AI, set `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` in your shell.");
     }
@@ -835,31 +836,13 @@ async function handleStatus(argv) {
   }
 
   if (options.wait) {
-    const workspaceRoot = resolveCommandWorkspace(options);
-    const allJobs = sortJobsNewestFirst(listJobs(workspaceRoot));
-    const activeJobs = allJobs.filter(
-      (job) => job.status === "queued" || job.status === "running"
-    );
-    const sessionActiveJobs = filterJobsForCurrentClaudeSession(activeJobs);
-
-    if (sessionActiveJobs.length === 1) {
-      const snapshot = await waitForSingleJobSnapshot(cwd, sessionActiveJobs[0].id, {
-        timeoutMs: options["timeout-ms"],
-        pollIntervalMs: options["poll-interval-ms"]
-      });
-      outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
-      return;
-    }
-    if (sessionActiveJobs.length > 1) {
-      throw new Error(
-        "Multiple Gemini jobs are active. Pass a job ID to `status --wait`."
-      );
-    }
-
-    if (getCurrentClaudeSessionId()) {
-      throw new Error("No active Gemini jobs to wait on for this session.");
-    }
-    throw new Error("No active Gemini jobs to wait on.");
+    const { job } = resolveWaitTargetJob(cwd, { all: options.all });
+    const snapshot = await waitForSingleJobSnapshot(cwd, job.id, {
+      timeoutMs: options["timeout-ms"],
+      pollIntervalMs: options["poll-interval-ms"]
+    });
+    outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+    return;
   }
 
   const report = buildStatusSnapshot(cwd, { all: options.all });

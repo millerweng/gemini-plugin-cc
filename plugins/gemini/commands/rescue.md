@@ -44,7 +44,7 @@ Operating rules:
 - Do not ask the subagent to inspect files, monitor progress, poll `/gemini:status`, fetch `/gemini:result`, call `/gemini:cancel`, summarize output, or do follow-up work of its own.
 - Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort. Note: the flag is accepted but has no effect yet (pending upstream ACP support for thinkingLevel).
 - Leave the model unset unless the user explicitly asks for one. Accept Gemini model aliases: `pro`, `pro-3`, `flash`, `flash-lite`, `2.5-pro`, `auto`. Pass concrete model IDs through unchanged.
-- `--plan` maps to Gemini's `--approval-mode plan` (read-only planning run). Without `--plan`, the companion defaults to `--yolo --sandbox` (macOS Seatbelt).
+- `--plan` maps to Gemini's `--approval-mode plan` (read-only planning run). Without `--plan`, the companion defaults to `--yolo --sandbox` (Gemini CLI built-in sandbox, filesystem scoped to the working tree).
 - `--worktree <path>` maps to Gemini's `-w <path>` (run in the given worktree).
 - Leave `--resume` and `--fresh` in the forwarded request. The subagent handles that routing when it builds the `task` command.
 - If the helper reports that Gemini is missing or unauthenticated, stop and tell the user to run `/gemini:setup`.

@@ -18,6 +18,7 @@ import {
 } from "./acp-client.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
+import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const TASK_SESSION_PREFIX = "Gemini Companion Task";
 export const DEFAULT_CONTINUE_PROMPT =
@@ -45,7 +46,7 @@ const EFFORT_TO_THINKING_LEVEL = new Map([
   ["high", "high"]
 ]);
 
-function cleanGeminiStderr(stderr) {
+export function cleanGeminiStderr(stderr) {
   return String(stderr ?? "")
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
@@ -374,15 +375,40 @@ export function getGeminiAvailability(cwd) {
   };
 }
 
-function readGeminiSettings() {
-  if (!fs.existsSync(GEMINI_SETTINGS_FILE)) {
-    return null;
-  }
+function readSettingsFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(GEMINI_SETTINGS_FILE, "utf8"));
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return null;
   }
+}
+
+export function readGeminiSettings(cwd) {
+  const workspaceRoot = resolveWorkspaceRoot(cwd ?? process.cwd());
+  const projectPath = path.join(workspaceRoot, ".gemini", "settings.json");
+  const projectSettings = readSettingsFile(projectPath);
+  const userSettings = readSettingsFile(GEMINI_SETTINGS_FILE);
+
+  if (!projectSettings && !userSettings) return { resolved: null, source: null };
+  if (projectSettings && !userSettings) return { resolved: projectSettings, source: projectPath };
+  if (!projectSettings && userSettings) return { resolved: userSettings, source: GEMINI_SETTINGS_FILE };
+
+  // Project overrides user per-key within security.auth
+  const mergedAuth = {
+    ...(userSettings?.security?.auth ?? {}),
+    ...(projectSettings?.security?.auth ?? {})
+  };
+  const merged = {
+    ...userSettings,
+    ...projectSettings,
+    security: {
+      ...(userSettings?.security ?? {}),
+      ...(projectSettings?.security ?? {}),
+      auth: mergedAuth
+    }
+  };
+  return { resolved: merged, source: projectPath };
 }
 
 function describeAuthType(selectedType, env) {
@@ -431,13 +457,15 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
   }
 
   const env = options.env ?? process.env;
-  const settings = readGeminiSettings();
+  const { resolved: settings } = readGeminiSettings(cwd);
   const selectedType = settings?.security?.auth?.selectedType ?? null;
   if (!selectedType) {
+    const workspaceRoot = resolveWorkspaceRoot(cwd ?? process.cwd());
+    const projectPath = path.join(workspaceRoot, ".gemini", "settings.json");
     return {
       available: true,
       loggedIn: false,
-      detail: `No auth type selected in ${GEMINI_SETTINGS_FILE}. Launch \`!gemini\` interactively to pick one.`,
+      detail: `No auth type selected. Checked ${projectPath} and ${GEMINI_SETTINGS_FILE}. Launch \`!gemini\` interactively to pick one.`,
       source: "settings",
       authMethod: null,
       verified: false,

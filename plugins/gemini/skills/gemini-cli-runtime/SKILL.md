@@ -30,7 +30,7 @@ Execution rules:
   - `2.5-flash-lite` → `gemini-2.5-flash-lite`
   - `auto` → `auto-gemini-3`
   - `auto-2.5` → `auto-gemini-2.5`
-- Default invocation mode for rescue is `--yolo --sandbox` (macOS Seatbelt). Opt out with `--plan` (maps to `--approval-mode plan`, read-only).
+- Default invocation mode for rescue is `--yolo --sandbox` (Gemini CLI built-in sandbox, filesystem scoped to the working tree). Opt out with `--plan` (maps to `--approval-mode plan`, read-only).
 
 Command selection:
 - Use exactly one `task` invocation per rescue handoff.

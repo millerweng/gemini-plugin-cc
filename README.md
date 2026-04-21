@@ -276,7 +276,7 @@ The plugin starts a shared ACP broker session so multiple commands reuse a singl
 
 ### Execution modes
 
-- **Default** (`--yolo --sandbox`) -- Gemini can read and write files within the repository worktree, sandboxed via macOS Seatbelt.
+- **Default** (`--yolo --sandbox`) -- Gemini can read and write files within the repository worktree, scoped by Gemini CLI's built-in sandbox mode (filesystem access limited to the working tree).
 - **Plan** (`--plan`) -- Read-only. Gemini proposes changes but does not execute them.
 
 ### Session persistence and timeouts
