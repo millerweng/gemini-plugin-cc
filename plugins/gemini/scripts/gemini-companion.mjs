@@ -69,9 +69,6 @@ const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 const VALID_REASONING_EFFORTS = new Set(["low", "medium", "high"]);
 
-// Gemini model aliases. Defaults mirror what Gemini CLI reports via
-// session/new → models.availableModels at protocol v1 (confirmed 2026-04-18).
-const DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const MODEL_ALIASES = new Map([
   ["pro", "gemini-3.1-pro-preview"],
   ["pro-3", "gemini-3.1-pro-preview"],
@@ -364,7 +361,7 @@ async function executeReviewRun(request) {
   const prompt = buildReviewPrompt(context, focusText, reviewName);
   const result = await runAcpReview(context.repoRoot, {
     prompt,
-    model: request.model ?? DEFAULT_MODEL,
+    model: request.model,
     outputSchema: readOutputSchema(REVIEW_SCHEMA),
     onProgress: request.onProgress
   });
@@ -445,7 +442,7 @@ async function executeTaskRun(request) {
     resumeSessionId,
     prompt: request.prompt,
     defaultPrompt: resumeSessionId ? DEFAULT_CONTINUE_PROMPT : "",
-    model: request.model ?? DEFAULT_MODEL,
+    model: request.model,
     effort: request.effort,
     sandbox,
     approvalMode,

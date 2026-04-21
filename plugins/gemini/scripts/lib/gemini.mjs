@@ -478,7 +478,7 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
     return {
       available: true,
       loggedIn: false,
-      detail: `No auth type selected. Checked ${projectPath} and ${GEMINI_SETTINGS_FILE}. Launch \`!gemini\` interactively to pick one.`,
+      detail: `No auth type selected. Checked ${projectPath} and ${GEMINI_SETTINGS_FILE}. Run \`gemini auth\` in a terminal outside Claude Code, or edit the settings file directly.`,
       source: "settings",
       authMethod: null,
       verified: false,

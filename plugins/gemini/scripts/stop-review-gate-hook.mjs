@@ -125,7 +125,7 @@ function buildFailureGuidance(classification) {
   switch (classification) {
     case "oauth-expired":
     case "auth-rejected":
-      return "Re-authenticate with `!gemini` or set GEMINI_API_KEY.";
+      return "Run `/gemini:setup` to diagnose and fix auth, or run `gemini auth` in a terminal outside Claude Code.";
     case "connection-refused":
     case "dns-failure":
       return "Check network connectivity or gateway configuration.";

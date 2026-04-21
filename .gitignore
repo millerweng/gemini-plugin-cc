@@ -26,3 +26,8 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
+
+# Gemini local config (may contain auth tokens)
+.gemini/

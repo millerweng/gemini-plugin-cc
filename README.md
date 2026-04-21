@@ -37,6 +37,7 @@ Six slash commands and a proactive subagent:
 ```bash
 /plugin marketplace add m-ghalib/gemini-plugin-cc
 /plugin install gemini@gemini-plugin-cc
+/reload-plugins
 /gemini:setup
 ```
 
