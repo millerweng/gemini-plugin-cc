@@ -148,7 +148,7 @@ Shows active and recent Gemini jobs for the current repository.
 
 | Flag | Description |
 |---|---|
-| `--wait` | Poll until a running job finishes |
+| `--wait` | Poll until a job finishes; auto-resolves if one active job exists, otherwise pass a job ID |
 | `--timeout-ms <n>` | Maximum time to poll (used with `--wait`) |
 | `--all` | Include jobs from all sessions, not just the current one |
 

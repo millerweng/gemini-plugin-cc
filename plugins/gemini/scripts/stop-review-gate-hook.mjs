@@ -158,8 +158,12 @@ function main() {
 
   const setupNote = buildSetupNote(cwd);
   if (setupNote) {
-    logNote(setupNote);
-    logNote(runningTaskNote);
+    const parts = [setupNote];
+    if (runningTaskNote) parts.push(runningTaskNote);
+    emitDecision({
+      decision: "block",
+      reason: parts.join(" ")
+    });
     return;
   }
 

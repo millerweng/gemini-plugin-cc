@@ -447,7 +447,9 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
   let loggedIn = false;
   switch (selectedType) {
     case "vertex-ai":
-      loggedIn = Boolean((env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT));
+      loggedIn = Boolean(
+        (env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT) && env.GOOGLE_CLOUD_LOCATION
+      );
       break;
     case "gemini-api-key":
       loggedIn = Boolean(env.GEMINI_API_KEY);

@@ -325,7 +325,7 @@ async function resolveLatestTrackedTaskSession(cwd, options = {}) {
   const trackedTask = findLatestResumableTaskJob(visibleJobs);
   if (trackedTask) return { id: trackedTask.threadId };
 
-  if (sessionId) return null;
+  if (sessionId && !options.explicit) return null;
 
   return findLatestTaskSession(workspaceRoot);
 }
@@ -406,7 +406,8 @@ async function executeTaskRun(request) {
   let resumeSessionId = null;
   if (request.resumeLast) {
     const latest = await resolveLatestTrackedTaskSession(workspaceRoot, {
-      excludeJobId: request.jobId
+      excludeJobId: request.jobId,
+      explicit: true
     });
     if (!latest) {
       throw new Error("No previous Gemini task session was found for this repository.");
@@ -700,6 +701,9 @@ async function handleTask(argv) {
     aliasMap: { m: "model", w: "worktree" }
   });
 
+  if (options.worktree) {
+    options.cwd = options.worktree;
+  }
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const model = normalizeRequestedModel(options.model);
@@ -712,7 +716,7 @@ async function handleTask(argv) {
     throw new Error("Choose either --resume/--resume-last or --fresh.");
   }
   const plan = Boolean(options.plan);
-  const write = plan ? false : Boolean(options.write);
+  const write = plan ? false : options.write !== false;
   const taskMetadata = buildTaskRunMetadata({ prompt, resumeLast });
 
   if (options.background) {
@@ -813,7 +817,31 @@ async function handleStatus(argv) {
   }
 
   if (options.wait) {
-    throw new Error("`status --wait` requires a job id.");
+    const workspaceRoot = resolveCommandWorkspace(options);
+    const allJobs = sortJobsNewestFirst(listJobs(workspaceRoot));
+    const activeJobs = allJobs.filter(
+      (job) => job.status === "queued" || job.status === "running"
+    );
+    const sessionActiveJobs = filterJobsForCurrentClaudeSession(activeJobs);
+
+    if (sessionActiveJobs.length === 1) {
+      const snapshot = await waitForSingleJobSnapshot(cwd, sessionActiveJobs[0].id, {
+        timeoutMs: options["timeout-ms"],
+        pollIntervalMs: options["poll-interval-ms"]
+      });
+      outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+      return;
+    }
+    if (sessionActiveJobs.length > 1) {
+      throw new Error(
+        "Multiple Gemini jobs are active. Pass a job ID to `status --wait`."
+      );
+    }
+
+    if (getCurrentClaudeSessionId()) {
+      throw new Error("No active Gemini jobs to wait on for this session.");
+    }
+    throw new Error("No active Gemini jobs to wait on.");
   }
 
   const report = buildStatusSnapshot(cwd, { all: options.all });
