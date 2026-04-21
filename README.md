@@ -93,7 +93,6 @@ Delegates code investigation, fixes, or diagnosis to Gemini. For exploratory or 
 | `--model <alias>` | Choose a specific Gemini model (see model aliases below) |
 | `--effort low\|medium\|high` | Set Gemini's thinking level (accepted; pending upstream ACP support) |
 | `--plan` | Read-only planning run (Gemini proposes but does not execute) |
-| `--worktree <path>` | Run Gemini in a specific worktree directory |
 
 **Model aliases:**
 

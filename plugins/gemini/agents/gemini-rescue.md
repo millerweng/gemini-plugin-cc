@@ -42,7 +42,6 @@ Forwarding rules:
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
 - Default invocation is `--yolo --sandbox` (the companion applies this automatically for rescue runs). The rescue agent defaults to a write-capable Gemini run.
 - `--plan` maps to Gemini's `--approval-mode plan` (read-only planning run). Forward it as a runtime flag, not task text.
-- `--worktree <path>` maps to Gemini's `-w <path>`. Forward it as a runtime flag, not task text.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.

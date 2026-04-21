@@ -34,4 +34,4 @@ If Gemini is already installed or npm is unavailable:
 Output rules:
 - Present the final setup output to the user.
 - If installation was skipped, present the original setup output.
-- If Gemini is installed but not authenticated, preserve the guidance to configure auth in `~/.gemini/settings.json` (or run `!gemini auth` in an interactive terminal). Do not claim a specific one-shot CLI command exists — the Gemini CLI recommends editing `~/.gemini/settings.json` or using the interactive CLI to authenticate.
+- If Gemini is installed but not authenticated, preserve the guidance to configure auth in `~/.gemini/settings.json` or run `gemini auth` in a terminal outside Claude Code. Do not suggest running auth commands via Claude's `!` prefix — the auth flow is interactive and requires a browser.

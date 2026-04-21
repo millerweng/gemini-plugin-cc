@@ -374,6 +374,14 @@ export function getGeminiAvailability(cwd) {
     return versionStatus;
   }
 
+  const acpStatus = binaryAvailable("gemini", ["--acp", "--help"], { cwd });
+  if (!acpStatus.available) {
+    return {
+      available: false,
+      detail: "gemini --version works but --acp mode is not supported by this build"
+    };
+  }
+
   return {
     available: true,
     detail: versionStatus.detail

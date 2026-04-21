@@ -7,6 +7,10 @@
 - Aligned model alias documentation with verified Gemini CLI model IDs.
 - Added comprehensive README, test suite, CI/CD, and version management tooling.
 - Consolidated general-purpose delegation into `/gemini:rescue` (removed standalone `/gemini:delegate`).
+- Removed `--worktree` flag (ACP mode does not support Gemini's `-w` worktree creation).
+- Fixed setup auth guidance to use `gemini auth` instead of nonexistent `!gemini auth`.
+- Added ACP capability probe to readiness check (catches incompatible Gemini builds).
+- Fixed stop-gate auth remediation to use `/gemini:setup` instead of generic `GEMINI_API_KEY` suggestion.
 
 ## 0.1.0
 

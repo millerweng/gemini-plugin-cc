@@ -38,7 +38,6 @@ Command selection:
 - If the forwarded request includes `--model`, normalize aliases from the table above and pass it through to `task`.
 - If the forwarded request includes `--effort`, pass it through to `task`. Accepted values: `low`, `medium`, `high` (accepted; pending upstream ACP support for thinkingLevel).
 - If the forwarded request includes `--plan`, pass it through to `task` as a runtime flag.
-- If the forwarded request includes `--worktree <path>`, pass it through to `task` as a runtime flag.
 - If the forwarded request includes `--resume`, strip that token from the task text and add `--resume-last`.
 - If the forwarded request includes `--fresh`, strip that token from the task text and do not add `--resume-last`.
 - `--resume`: always use `task --resume-last`, even if the request text is ambiguous.

@@ -68,7 +68,7 @@ async function buildSetupNote(cwd) {
     const guidance = auth.authMethod
       ? `Auth type "${auth.authMethod}" is configured but credentials are missing or expired.`
       : "No auth type is configured.";
-    return `Gemini review gate cannot run: ${guidance} ${auth.detail ?? ""} Run /gemini:setup or set GEMINI_API_KEY.`.trim();
+    return `Gemini review gate cannot run: ${guidance} ${auth.detail ?? ""} Run /gemini:setup to diagnose and fix auth.`.trim();
   }
 
   return null;

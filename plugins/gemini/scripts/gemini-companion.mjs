@@ -92,7 +92,7 @@ function printUsage() {
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [--worktree <name>] [prompt]",
+      "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/gemini-companion.mjs result [job-id] [--json]",
       "  node scripts/gemini-companion.mjs cancel [job-id] [--json]"
@@ -190,7 +190,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     nextSteps.push("Install Gemini CLI with `npm install -g @google/gemini-cli@0.38.2`.");
   }
   if (geminiStatus.available && !authStatus.loggedIn) {
-    nextSteps.push("Configure Gemini auth: edit `<repo>/.gemini/settings.json` (project-scoped) or `~/.gemini/settings.json` (user-level), or launch `!gemini` interactively.");
+    nextSteps.push("Configure Gemini auth: edit `<repo>/.gemini/settings.json` (project-scoped) or `~/.gemini/settings.json` (user-level), or run `gemini auth` in a terminal outside Claude Code.");
     if (authStatus.authMethod === "vertex-ai") {
       nextSteps.push("For Vertex AI, set `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` in your shell.");
     }
@@ -707,7 +707,7 @@ async function handleReview(argv) {
 
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "worktree"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file"],
     booleanOptions: [
       "json",
       "write",
@@ -717,12 +717,9 @@ async function handleTask(argv) {
       "fresh",
       "background"
     ],
-    aliasMap: { m: "model", w: "worktree" }
+    aliasMap: { m: "model" }
   });
 
-  if (options.worktree) {
-    options.cwd = options.worktree;
-  }
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const model = normalizeRequestedModel(options.model);
