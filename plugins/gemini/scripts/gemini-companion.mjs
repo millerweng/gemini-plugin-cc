@@ -240,6 +240,11 @@ async function handleSetup(argv) {
     const connectivity = await verifyGeminiConnectivity(cwd);
     finalReport.auth.verified = connectivity.verified;
     finalReport.auth.verifyDetail = connectivity.detail;
+    if (!connectivity.verified) {
+      finalReport.ready = false;
+      finalReport.nextSteps = finalReport.nextSteps ?? [];
+      finalReport.nextSteps.push(`Verification failed: ${connectivity.detail}`);
+    }
   }
 
   if (!options.verify && finalReport.auth.loggedIn && finalReport.auth.verified === null) {

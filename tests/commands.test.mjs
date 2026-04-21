@@ -104,7 +104,8 @@ test("hooks keep session-end cleanup and stop gating enabled", () => {
 
 test("setup command can offer Gemini install and toggle review gate", () => {
   const setup = read("commands/setup.md");
-  assert.match(setup, /argument-hint:\s*'\[--enable-review-gate\|--disable-review-gate\]'/);
+  assert.match(setup, /argument-hint:.*--verify/);
+  assert.match(setup, /argument-hint:.*--enable-review-gate/);
   assert.match(setup, /AskUserQuestion/);
   assert.match(setup, /gemini-companion\.mjs" setup/);
 });

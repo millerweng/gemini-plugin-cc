@@ -52,7 +52,11 @@ export function resolveJobsDir(cwd) {
 }
 
 export function ensureStateDir(cwd) {
-  fs.mkdirSync(resolveJobsDir(cwd), { recursive: true, mode: 0o700 });
+  const stateDir = resolveStateDir(cwd);
+  const jobsDir = resolveJobsDir(cwd);
+  fs.mkdirSync(jobsDir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(stateDir, 0o700); } catch {}
+  try { fs.chmodSync(jobsDir, 0o700); } catch {}
 }
 
 export function loadState(cwd) {
@@ -111,7 +115,9 @@ export function saveState(cwd, state) {
     removeFileIfExists(job.logFile);
   }
 
-  fs.writeFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  const stateFile = resolveStateFile(cwd);
+  fs.writeFileSync(stateFile, `${JSON.stringify(nextState, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try { fs.chmodSync(stateFile, 0o600); } catch {}
   return nextState;
 }
 
@@ -167,6 +173,7 @@ export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const jobFile = resolveJobFile(cwd, jobId);
   fs.writeFileSync(jobFile, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try { fs.chmodSync(jobFile, 0o600); } catch {}
   return jobFile;
 }
 

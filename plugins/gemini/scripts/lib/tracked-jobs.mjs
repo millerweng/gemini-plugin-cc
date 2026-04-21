@@ -51,6 +51,7 @@ export function appendLogBlock(logFile, title, body) {
 export function createJobLogFile(workspaceRoot, jobId, title) {
   const logFile = resolveJobLogFile(workspaceRoot, jobId);
   fs.writeFileSync(logFile, "", { encoding: "utf8", mode: 0o600 });
+  try { fs.chmodSync(logFile, 0o600); } catch {}
   if (title) {
     appendLogLine(logFile, `Starting ${title}.`);
   }

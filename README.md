@@ -208,6 +208,8 @@ If the Gemini CLI is not installed and npm is available, offers to install it vi
 
 The review gate is a `Stop` hook that blocks Claude from finishing until Gemini has reviewed the work. When the gate cannot reach Gemini (auth failure, network issue), it blocks and surfaces actionable guidance rather than silently allowing the stop. Disable with `--disable-review-gate` if the block is not resolvable in the current session.
 
+**Limitation:** The gate receives Claude's last response text and the current repository state, not a per-turn diff. In multi-turn sessions with a dirty working tree, Gemini uses the response text to attribute changes to the most recent turn, but cannot perfectly distinguish this turn's edits from earlier ones.
+
 **Examples:**
 
 ```bash
