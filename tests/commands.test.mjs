@@ -35,7 +35,6 @@ test("all expected commands are present", () => {
   assert.deepEqual(commandFiles, [
     "adversarial-review.md",
     "cancel.md",
-    "delegate.md",
     "rescue.md",
     "result.md",
     "review.md",
@@ -44,10 +43,21 @@ test("all expected commands are present", () => {
   ]);
 });
 
-test("rescue command routes through the gemini-rescue subagent", () => {
+test("rescue command routes through the gemini-rescue subagent via Agent tool (not context: fork)", () => {
   const rescue = read("commands/rescue.md");
   const agent = read("agents/gemini-rescue.md");
   const runtimeSkill = read("skills/gemini-cli-runtime/SKILL.md");
+
+  // Regression: rescue must NOT use context: fork (causes recursion into the command
+  // instead of invoking the subagent — same bug documented in codex-plugin-cc #234).
+  assert.doesNotMatch(rescue, /^context:\s*fork\b/m);
+
+  // Must route via Agent tool with explicit subagent_type.
+  assert.match(rescue, /subagent_type.*gemini:gemini-rescue/);
+  assert.match(rescue, /Agent/);
+
+  // Anti-recursion guard: must warn against calling Skill(gemini:rescue).
+  assert.match(rescue, /do not call.*Skill\(gemini:rescue\)/i);
 
   assert.match(rescue, /--background\|--wait/);
   assert.match(rescue, /--resume\|--fresh/);
@@ -62,15 +72,6 @@ test("rescue command routes through the gemini-rescue subagent", () => {
   assert.match(agent, /Do not inspect the repository/i);
   assert.match(runtimeSkill, /only job is to invoke `task` once and return that stdout unchanged/i);
   assert.match(runtimeSkill, /Do not call `setup`, `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
-});
-
-test("delegate command exists alongside rescue for general-purpose delegation", () => {
-  const delegate = read("commands/delegate.md");
-  assert.match(delegate, /--background\|--wait/);
-  assert.match(delegate, /--resume\|--fresh/);
-  assert.match(delegate, /--model/);
-  assert.match(delegate, /--effort/);
-  assert.match(delegate, /gemini:gemini-rescue/);
 });
 
 test("result and cancel commands are deterministic runtime entrypoints", () => {

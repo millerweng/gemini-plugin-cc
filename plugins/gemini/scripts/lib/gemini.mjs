@@ -681,7 +681,7 @@ export async function runAcpTurn(cwd, options = {}) {
   const availability = getGeminiAvailability(cwd);
   if (!availability.available) {
     throw new Error(
-      "Gemini CLI is not installed. Install it with `npm install -g @google/gemini-cli`, then rerun `/gemini:setup`."
+      "Gemini CLI is not installed. Install it with `npm install -g @google/gemini-cli@0.38.2`, then rerun `/gemini:setup`."
     );
   }
 

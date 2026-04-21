@@ -187,7 +187,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 
   const nextSteps = [];
   if (!geminiStatus.available) {
-    nextSteps.push("Install Gemini CLI with `npm install -g @google/gemini-cli`.");
+    nextSteps.push("Install Gemini CLI with `npm install -g @google/gemini-cli@0.38.2`.");
   }
   if (geminiStatus.available && !authStatus.loggedIn) {
     nextSteps.push("Configure Gemini auth: edit `<repo>/.gemini/settings.json` (project-scoped) or `~/.gemini/settings.json` (user-level), or launch `!gemini` interactively.");
@@ -272,7 +272,7 @@ function ensureGeminiAvailable(cwd) {
   const availability = getGeminiAvailability(cwd);
   if (!availability.available) {
     throw new Error(
-      "Gemini CLI is not installed. Install it with `npm install -g @google/gemini-cli`, then rerun `/gemini:setup`."
+      "Gemini CLI is not installed. Install it with `npm install -g @google/gemini-cli@0.38.2`, then rerun `/gemini:setup`."
     );
   }
 }

@@ -2,26 +2,25 @@
 
 Use Gemini from inside Claude Code for code reviews or to delegate tasks to Gemini.
 
-This plugin lets you delegate tasks, reviews, and adversarial reviews to [Google's Gemini CLI](https://github.com/google-gemini/gemini-cli) without leaving your Claude Code session. It wraps the Gemini CLI via the Agent-Client Protocol (ACP) -- JSON-RPC 2.0 over stdio -- so Claude and Gemini can work side by side on the same codebase.
+This plugin lets you delegate tasks, reviews, and adversarial reviews to [Google's Gemini CLI](https://github.com/google-gemini/gemini-cli) (`@google/gemini-cli@0.38.2`) without leaving your Claude Code session. It wraps the Gemini CLI via the Agent-Client Protocol (ACP) -- JSON-RPC 2.0 over stdio -- so Claude and Gemini can work side by side on the same codebase.
 
 ---
 
 ## What You Get
 
-Eight slash commands and a proactive subagent:
+Six slash commands and a proactive subagent:
 
 | Command | Purpose |
 |---|---|
 | `/gemini:review` | Code review with structured findings |
 | `/gemini:adversarial-review` | Steerable adversarial review that challenges design choices |
-| `/gemini:rescue` | Delegate investigation, fix, or diagnosis work to Gemini (code-focused) |
-| `/gemini:delegate` | Delegate any task to Gemini: research, writing, analysis, brainstorming, explanation (general-purpose) |
+| `/gemini:rescue` | Delegate investigation, fix, diagnosis, research, or any substantial task to Gemini |
 | `/gemini:status` | Check active and recent Gemini jobs |
 | `/gemini:result` | View the stored output of a finished job |
 | `/gemini:cancel` | Cancel an active background job |
 | `/gemini:setup` | Verify readiness, check auth, toggle review gate |
 
-**`gemini-rescue` subagent** -- Claude Code can proactively delegate substantial tasks to Gemini through this subagent. It handles both code-focused (`/gemini:rescue`) and general-purpose (`/gemini:delegate`) invocations as a thin forwarding wrapper around the Gemini companion runtime.
+**`gemini-rescue` subagent** -- Claude Code can proactively delegate substantial tasks to Gemini through this subagent. It handles debugging, implementation, research, writing, analysis, brainstorming, explanation, or a second diagnosis pass as a thin forwarding wrapper around the Gemini companion runtime.
 
 ---
 
@@ -29,7 +28,7 @@ Eight slash commands and a proactive subagent:
 
 - **Google account with Gemini CLI access**, or a Gemini API key, or Vertex AI credentials
 - **Node.js 18.18 or later**
-- **Gemini CLI** (`@google/gemini-cli`) -- the setup command can install it for you
+- **Gemini CLI** (`@google/gemini-cli@0.38.2`) -- the setup command can install it for you
 
 ---
 
@@ -41,7 +40,7 @@ Eight slash commands and a proactive subagent:
 /gemini:setup
 ```
 
-The `/gemini:setup` command checks whether the Gemini CLI is installed and authenticated. If the CLI is missing and npm is available, it offers to install it for you via `npm install -g @google/gemini-cli`.
+The `/gemini:setup` command checks whether the Gemini CLI is installed and authenticated. If the CLI is missing and npm is available, it offers to install it for you via `npm install -g @google/gemini-cli@0.38.2`.
 
 ---
 
@@ -119,23 +118,6 @@ Concrete model IDs are also accepted (e.g., `--model gemini-3-pro-preview`).
 /gemini:rescue --background fix the flaky test in user-service
 /gemini:rescue --plan trace the data flow from API to database for the orders endpoint
 /gemini:rescue --model flash --effort high diagnose the memory leak in the worker pool
-```
-
----
-
-### `/gemini:delegate`
-
-General-purpose delegation: research, writing, analysis, brainstorming, explanation, or anything else. Unlike `/gemini:rescue`, this command does not nudge Gemini toward code investigation -- the task may not involve code at all.
-
-**Flags:** same as `/gemini:rescue` (`--background`, `--wait`, `--resume`, `--fresh`, `--model`, `--effort` (pending upstream support), `--plan`, `--worktree`).
-
-**Examples:**
-
-```bash
-/gemini:delegate research the best rate limiting libraries for Node.js and recommend one
-/gemini:delegate write a technical design doc for the new caching layer
-/gemini:delegate --model 2.5-pro analyze the tradeoffs between REST and gRPC for our use case
-/gemini:delegate --background summarize the last 20 merged PRs and identify patterns
 ```
 
 ---
@@ -248,10 +230,10 @@ The review gate is a `Stop` hook that blocks Claude from finishing until Gemini 
 /gemini:rescue --resume apply the top fix from your investigation
 ```
 
-**General-purpose delegation:**
+**General-purpose delegation via rescue:**
 
 ```bash
-/gemini:delegate research the best rate limiting libraries for Node.js and recommend one
+/gemini:rescue research the best rate limiting libraries for Node.js and recommend one
 ```
 
 ---
@@ -321,10 +303,10 @@ The plugin detects this and tells you to run `/gemini:setup`. You can also run `
 When enabled via `/gemini:setup --enable-review-gate`, a `Stop` hook fires every time Claude is about to finish. The hook triggers a Gemini review of Claude's changes, giving you an automatic second opinion. Disable it with `/gemini:setup --disable-review-gate`.
 
 **Can I control which Gemini model is used?**
-Yes. Pass `--model <alias>` to `/gemini:rescue` or `/gemini:delegate`. See the model aliases table under `/gemini:rescue`. If no model is specified, Gemini uses its default.
+Yes. Pass `--model <alias>` to `/gemini:rescue`. See the model aliases table above. If no model is specified, Gemini uses its default.
 
 > [!WARNING]
-> The default `--yolo --sandbox` mode allows Gemini to modify files in your repository. Make sure your work is committed or stashed before running rescue or delegate commands that may write to the worktree.
+> The default `--yolo --sandbox` mode allows Gemini to modify files in your repository. Make sure your work is committed or stashed before running rescue commands that may write to the worktree.
 
 ---
 

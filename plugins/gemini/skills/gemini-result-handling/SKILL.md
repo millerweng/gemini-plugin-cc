@@ -26,4 +26,4 @@ Handling empty output and failures:
 
 Review-specific safety:
 - CRITICAL: After presenting review findings, STOP. Do not make any code changes. Do not fix any issues. You MUST explicitly ask the user which issues, if any, they want fixed before touching a single file. Auto-applying fixes from a review is strictly forbidden, even if the fix is obvious.
-- This rule applies only to review output. For `/gemini:delegate` output that happens to contain code suggestions, follow normal delegation-output handling — surface what Gemini produced and let the user decide what to do next.
+- This rule applies only to review output. For `/gemini:rescue` output that happens to contain code suggestions, follow normal delegation-output handling — surface what Gemini produced and let the user decide what to do next.

@@ -1,5 +1,5 @@
 // Gemini ACP protocol types.
-// Confirmed against gemini-cli 0.39.0-preview.0 via `gemini --acp` stdin/stdout probes.
+// Confirmed against gemini-cli 0.38.2 via `gemini --acp` stdin/stdout probes.
 // Zed's Agent-Client Protocol v1: https://github.com/zed-industries/agent-client-protocol
 //
 // API stability: method names are tracked by the ACP_METHODS table at the top of

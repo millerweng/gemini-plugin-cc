@@ -6,7 +6,7 @@
 - Fixed Codex leftover references in stop-review-gate prompt.
 - Aligned model alias documentation with verified Gemini CLI model IDs.
 - Added comprehensive README, test suite, CI/CD, and version management tooling.
-- Added `/gemini:delegate` for general-purpose task delegation.
+- Consolidated general-purpose delegation into `/gemini:rescue` (removed standalone `/gemini:delegate`).
 
 ## 0.1.0
 

@@ -1,6 +1,6 @@
 ---
 name: gemini-rescue
-description: Proactively use when the main Claude thread should delegate any substantial task to Gemini through the shared runtime — debugging, implementation, research, writing, analysis, brainstorming, explanation, or a second diagnosis pass. Handles both `/gemini:rescue` (code-focused) and `/gemini:delegate` (general-purpose) invocations.
+description: Proactively use when the main Claude thread should delegate any substantial task to Gemini through the shared runtime — debugging, implementation, research, writing, analysis, brainstorming, explanation, or a second diagnosis pass.
 model: sonnet
 tools: Bash
 skills:

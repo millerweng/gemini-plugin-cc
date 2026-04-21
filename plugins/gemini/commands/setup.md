@@ -19,7 +19,7 @@ If the result says Gemini is unavailable and npm is available:
 - If the user chooses install, run:
 
 ```bash
-npm install -g @google/gemini-cli
+npm install -g @google/gemini-cli@0.38.2
 ```
 
 - Then rerun:
