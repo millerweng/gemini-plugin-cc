@@ -1,0 +1,21 @@
+Gemini Plugin for Claude Code
+
+Copyright 2026 Momin Abrar Ghalib
+
+This plugin is derived from the Codex Plugin for Claude Code,
+Copyright 2026 OpenAI, licensed under the Apache License, Version 2.0.
+
+Portions of the Node.js plumbing (broker lifecycle, state management,
+job control, tracked jobs, arg parsing, fs helpers, and rendering) are
+forked from that codebase with identifiers renamed for the Gemini CLI
+(Google) integration.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.

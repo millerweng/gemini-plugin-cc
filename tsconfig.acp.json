@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "plugins/gemini/scripts/lib/acp-client.mjs",
+    "plugins/gemini/scripts/lib/gemini.mjs",
+    "plugins/gemini/scripts/lib/fs.mjs",
+    "plugins/gemini/scripts/lib/process.mjs",
+    "plugins/gemini/scripts/lib/acp-protocol.d.ts"
+  ]
+}
