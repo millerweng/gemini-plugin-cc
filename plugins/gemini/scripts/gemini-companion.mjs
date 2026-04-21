@@ -298,6 +298,7 @@ function findLatestResumableTaskJob(jobs) {
       (job) =>
         job.jobClass === "task" &&
         job.threadId &&
+        !job.stopGate &&
         job.status !== "queued" &&
         job.status !== "running"
     ) ?? null
@@ -438,6 +439,7 @@ async function executeTaskRun(request) {
   const approvalMode = request.plan ? "plan" : request.write ? "yolo" : null;
   const sandbox = request.plan ? "read-only" : request.write ? "workspace-write" : "read-only";
 
+  const isStopGate = taskMetadata.stopGate;
   const result = await runAcpTurn(workspaceRoot, {
     resumeSessionId,
     prompt: request.prompt,
@@ -447,7 +449,7 @@ async function executeTaskRun(request) {
     sandbox,
     approvalMode,
     onProgress: request.onProgress,
-    persistThread: true,
+    persistThread: !isStopGate,
     threadName: resumeSessionId
       ? null
       : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
@@ -487,6 +489,7 @@ async function executeTaskRun(request) {
     ),
     jobTitle: taskMetadata.title,
     jobClass: "task",
+    stopGate: isStopGate,
     write: Boolean(request.write)
   };
 }
@@ -503,7 +506,8 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
   if (!resumeLast && String(prompt ?? "").includes(STOP_REVIEW_TASK_MARKER)) {
     return {
       title: "Gemini Stop Gate Review",
-      summary: "Stop-gate review of previous Claude turn"
+      summary: "Stop-gate review of previous Claude turn",
+      stopGate: true
     };
   }
 
@@ -511,7 +515,8 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
   const fallbackSummary = resumeLast ? DEFAULT_CONTINUE_PROMPT : "Task";
   return {
     title,
-    summary: shorten(prompt || fallbackSummary)
+    summary: shorten(prompt || fallbackSummary),
+    stopGate: false
   };
 }
 
@@ -524,7 +529,7 @@ function getJobKindLabel(kind, jobClass) {
   return jobClass === "review" ? "review" : "rescue";
 }
 
-function createCompanionJob({ prefix, kind, title, workspaceRoot, jobClass, summary, write = false }) {
+function createCompanionJob({ prefix, kind, title, workspaceRoot, jobClass, summary, write = false, stopGate = false }) {
   return createJobRecord({
     id: generateJobId(prefix),
     kind,
@@ -533,7 +538,8 @@ function createCompanionJob({ prefix, kind, title, workspaceRoot, jobClass, summ
     workspaceRoot,
     jobClass,
     summary,
-    write
+    write,
+    stopGate
   });
 }
 
@@ -557,6 +563,7 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
     workspaceRoot,
     jobClass: "task",
     summary: taskMetadata.summary,
+    stopGate: taskMetadata.stopGate,
     write
   });
 }

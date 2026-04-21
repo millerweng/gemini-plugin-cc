@@ -38,12 +38,7 @@ export const ACP_METHODS = Object.freeze({
 });
 
 /** @type {ClientCapabilities} */
-const DEFAULT_CLIENT_CAPABILITIES = {
-  fs: {
-    readTextFile: true,
-    writeTextFile: true
-  }
-};
+const DEFAULT_CLIENT_CAPABILITIES = {};
 
 const DEFAULT_PROTOCOL_VERSION = 1;
 

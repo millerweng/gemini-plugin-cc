@@ -15,6 +15,10 @@
 - Fixed setup auth guidance to use `gemini auth` instead of nonexistent `!gemini auth`.
 - Added ACP capability probe to readiness check (catches incompatible Gemini builds).
 - Fixed stop-gate auth remediation to use `/gemini:setup` instead of generic `GEMINI_API_KEY` suggestion.
+- Fixed stop-gate review sessions polluting rescue resume state (`--resume` no longer picks up gate threads).
+- Fixed `setup --verify` hanging against live Gemini CLI (switched to async spawn, added `mcpServers: []`).
+- Removed false ACP filesystem capabilities (client no longer advertises unimplemented `readTextFile`/`writeTextFile`).
+- Added runtime test coverage for stop-gate exclusion, ACP capabilities, and verify connectivity.
 
 ## 0.1.0
 

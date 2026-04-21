@@ -531,54 +531,79 @@ export async function verifyGeminiConnectivity(cwd, options = {}) {
     return { verified: false, detail: `Auth check failed: ${authStatus.detail}` };
   }
 
-  const { spawnSync } = await import("node:child_process");
+  const { spawn: spawnChild } = await import("node:child_process");
+  const { createInterface } = await import("node:readline");
   const timeout = options.timeout ?? 15000;
 
-  // Send initialize + session/new to actually exercise the auth path.
   const requests = [
     JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } }),
-    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd } })
+    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd, mcpServers: [] } })
   ].join("\n") + "\n";
 
-  const result = spawnSync("gemini", ["--acp"], {
-    cwd,
-    input: requests,
-    encoding: "utf8",
-    timeout,
-    env: { ...process.env, ...(options.env ?? {}) }
-  });
+  return new Promise((resolve) => {
+    const child = spawnChild("gemini", ["--acp"], {
+      cwd,
+      env: { ...process.env, ...(options.env ?? {}) },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
 
-  if (result.error || result.status !== 0) {
-    const detail = result.error?.message ?? result.stderr?.trim() ?? "gemini --acp failed";
-    return { verified: false, detail };
-  }
+    let settled = false;
+    let initOk = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill();
+        resolve({ verified: false, detail: "ACP verification timed out" });
+      }
+    }, timeout);
 
-  const lines = (result.stdout ?? "").split("\n").filter(Boolean);
-  let initOk = false;
-  for (const line of lines) {
-    try {
-      const msg = JSON.parse(line);
-      if (msg.id === 1 && msg.result) {
-        initOk = true;
-      }
-      if (msg.id === 1 && msg.error) {
-        return { verified: false, detail: msg.error.message ?? "ACP initialization rejected" };
-      }
-      if (msg.id === 2 && msg.result?.sessionId) {
-        return { verified: true, detail: "ACP session created successfully" };
-      }
-      if (msg.id === 2 && msg.error) {
-        return { verified: false, detail: msg.error.message ?? "Session creation failed (auth may be invalid)" };
-      }
-    } catch {
-      continue;
+    function finish(result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      resolve(result);
     }
-  }
 
-  if (initOk) {
-    return { verified: false, detail: "ACP initialized but session creation got no response" };
-  }
-  return { verified: false, detail: "No valid ACP response received" };
+    const rl = createInterface({ input: child.stdout });
+    rl.on("line", (line) => {
+      try {
+        const msg = JSON.parse(line);
+        if (msg.id === 1 && msg.result) initOk = true;
+        if (msg.id === 1 && msg.error) {
+          finish({ verified: false, detail: msg.error.message ?? "ACP initialization rejected" });
+          return;
+        }
+        if (msg.id === 2 && msg.result?.sessionId) {
+          finish({ verified: true, detail: "ACP session created successfully" });
+          return;
+        }
+        if (msg.id === 2 && msg.error) {
+          finish({ verified: false, detail: msg.error.message ?? "Session creation failed (auth may be invalid)" });
+          return;
+        }
+      } catch {
+        // non-JSON line, skip
+      }
+    });
+
+    child.on("error", (err) => {
+      finish({ verified: false, detail: err.message ?? "gemini --acp failed to start" });
+    });
+
+    child.on("close", () => {
+      if (!settled) {
+        finish(
+          initOk
+            ? { verified: false, detail: "ACP initialized but session creation got no response" }
+            : { verified: false, detail: "No valid ACP response received" }
+        );
+      }
+    });
+
+    child.stdin.write(requests);
+    child.stdin.end();
+  });
 }
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
