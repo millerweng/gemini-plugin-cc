@@ -1,51 +1,89 @@
 # Gemini plugin for Claude Code
 
-Use Gemini from inside Claude Code for code reviews or to delegate tasks to Gemini.
+![Gemini plugin onboarding terminal loop](docs/assets/gemini-plugin-cc-onboarding.gif)
 
-This plugin lets you delegate tasks, reviews, and adversarial reviews to [Google's Gemini CLI](https://github.com/google-gemini/gemini-cli) (`@google/gemini-cli@0.38.2`) without leaving your Claude Code session. It wraps the Gemini CLI via the Agent-Client Protocol (ACP) -- JSON-RPC 2.0 over stdio -- so Claude and Gemini can work side by side on the same codebase.
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18.18-blue.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-npm-green.svg)](tests/)
 
----
+## Installation
 
-## What You Get
-
-Six slash commands and a proactive subagent:
-
-| Command | Purpose |
-|---|---|
-| `/gemini:review` | Code review with structured findings |
-| `/gemini:adversarial-review` | Steerable adversarial review that challenges design choices |
-| `/gemini:rescue` | Delegate investigation, fix, diagnosis, research, or any substantial task to Gemini |
-| `/gemini:status` | Check active and recent Gemini jobs |
-| `/gemini:result` | View the stored output of a finished job |
-| `/gemini:cancel` | Cancel an active background job |
-| `/gemini:setup` | Verify readiness, check auth, toggle review gate |
-
-**`gemini-rescue` subagent** -- Claude Code can proactively delegate substantial tasks to Gemini through this subagent. It handles debugging, implementation, research, writing, analysis, brainstorming, explanation, or a second diagnosis pass as a thin forwarding wrapper around the Gemini companion runtime.
-
----
-
-## Requirements
-
-- **Google account with Gemini CLI access**, or a Gemini API key, or Vertex AI credentials
-- **Node.js 18.18 or later**
-- **Gemini CLI** (`@google/gemini-cli@0.38.2`) -- the setup command can install it for you
-
----
-
-## Install
-
-```bash
+```text
 /plugin marketplace add m-ghalib/gemini-plugin-cc
 /plugin install gemini@gemini-plugin-cc
 /reload-plugins
-/gemini:setup
+/gemini:setup --verify
 ```
 
-The `/gemini:setup` command checks whether the Gemini CLI is installed and authenticated. If the CLI is missing and npm is available, it offers to install it for you via `npm install -g @google/gemini-cli@0.38.2`.
+The `/gemini:setup` command checks whether the Gemini CLI is installed and authenticated. If the CLI is missing and npm is available, it offers to install the pinned CLI with `npm install -g @google/gemini-cli@0.38.2`.
 
----
+## Prerequisites
 
-## Usage
+- Claude Code installed and authenticated. Run the install commands above inside a Claude Code session.
+- Node.js 18.18 or later on `PATH`.
+- Gemini CLI access through Google OAuth, a Gemini API key, a Google API key, Vertex AI, or an AI gateway.
+- Gemini CLI authentication configured in `~/.gemini/settings.json`, or completed interactively by running `gemini` in a terminal.
+
+## What it does
+
+gemini-plugin-cc gives Claude Code a local Gemini companion for code review,
+adversarial review, and delegated task work. It wraps [Google's Gemini CLI](https://github.com/google-gemini/gemini-cli)
+(`@google/gemini-cli@0.38.2`) through the Agent-Client Protocol (ACP), using
+JSON-RPC 2.0 over stdio so Claude and Gemini can work side by side on the same
+repository.
+
+The plugin exposes seven slash commands plus the `gemini-rescue` subagent.
+Review commands are read-only. Rescue defaults to Gemini CLI's write-capable
+`--yolo --sandbox` mode, scoped to the repository worktree; use `--plan` for a
+read-only planning run.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `/gemini:setup` | Verify Gemini CLI readiness, check auth, and toggle the review gate |
+| `/gemini:review` | Review code changes with structured findings |
+| `/gemini:adversarial-review` | Challenge implementation choices, tradeoffs, and assumptions |
+| `/gemini:rescue` | Delegate investigation, diagnosis, research, or fix work to Gemini |
+| `/gemini:status` | Check active and recent Gemini jobs |
+| `/gemini:result` | Show the stored output of a finished job |
+| `/gemini:cancel` | Cancel an active background job |
+
+## Quick Flows
+
+**Verify the install:**
+
+```text
+/gemini:setup --verify
+```
+
+**Review current work:**
+
+```text
+/gemini:review --wait
+```
+
+**Challenge a feature branch:**
+
+```text
+/gemini:adversarial-review --base main challenge whether this retry logic handles all failure modes
+```
+
+**Delegate an investigation:**
+
+```text
+/gemini:rescue --background investigate the N+1 query problem in the user dashboard
+/gemini:status --wait
+/gemini:result
+```
+
+**Enable stop-time review:**
+
+```text
+/gemini:setup --enable-review-gate
+```
+
+## Detailed Reference
 
 ### `/gemini:review`
 
@@ -178,7 +216,7 @@ Accepts an optional job ID. Defaults to the latest active job.
 
 Checks Gemini CLI availability and authentication status. Reports the detected auth method (OAuth, API key, Vertex AI, gateway) and whether credentials are present locally. Use `--verify` to confirm credentials work end-to-end.
 
-If the Gemini CLI is not installed and npm is available, offers to install it via `npm install -g @google/gemini-cli`.
+If the Gemini CLI is not installed and npm is available, offers to install it via `npm install -g @google/gemini-cli@0.38.2`.
 
 **Flags:**
 
@@ -196,44 +234,9 @@ The review gate is a `Stop` hook that blocks Claude from finishing until Gemini 
 
 ```bash
 /gemini:setup
+/gemini:setup --verify
 /gemini:setup --enable-review-gate
 /gemini:setup --disable-review-gate
-```
-
----
-
-## Typical Flows
-
-**Quick code review:**
-
-```bash
-/gemini:review
-```
-
-**Deep adversarial review of a feature branch:**
-
-```bash
-/gemini:adversarial-review --base main challenge whether this retry logic handles all failure modes
-```
-
-**Delegate a complex investigation:**
-
-```bash
-/gemini:rescue --background investigate the N+1 query problem in the user dashboard
-/gemini:status --wait
-/gemini:result
-```
-
-**Continue a prior Gemini thread:**
-
-```bash
-/gemini:rescue --resume apply the top fix from your investigation
-```
-
-**General-purpose delegation via rescue:**
-
-```bash
-/gemini:rescue research the best rate limiting libraries for Node.js and recommend one
 ```
 
 ---
