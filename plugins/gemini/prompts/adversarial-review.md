@@ -47,16 +47,19 @@ A finding should answer:
 </finding_bar>
 
 <structured_output_contract>
-Return only valid JSON matching the provided schema.
+Return only valid JSON, wrapped in a ```json fenced block so the helper can parse it deterministically.
 Keep the output compact and specific.
-Use `needs-attention` if there is any material risk worth blocking on.
-Use `approve` only if you cannot support any substantive adversarial finding from the provided context.
-Every finding must include:
-- the affected file
-- `line_start` and `line_end`
-- a confidence score from 0 to 1
-- a concrete recommendation
-Write the summary like a terse ship/no-ship assessment, not a neutral recap.
+The JSON MUST conform to this JSON Schema:
+
+```json
+{{OUTPUT_SCHEMA}}
+```
+
+Field requirements:
+- `verdict`: `needs-attention` if there is any material risk worth blocking on; `approve` only if you cannot support any substantive adversarial finding from the provided context.
+- `summary`: a terse ship/no-ship assessment, not a neutral recap.
+- `findings`: an array (use `[]` when there are no findings). Every finding MUST include `severity` (`critical`, `high`, `medium`, or `low`), a short `title`, a `body` explaining the issue, the affected `file`, `line_start` and `line_end`, a `confidence` score from 0 to 1, and a concrete `recommendation`.
+- `next_steps`: an array of short, actionable follow-up strings (use `[]` when there are none).
 </structured_output_contract>
 
 <grounding_rules>

@@ -278,7 +278,8 @@ function buildReviewPrompt(context, focusText, reviewName) {
     TARGET_LABEL: context.target.label,
     USER_FOCUS: focusText || "No extra focus provided.",
     REVIEW_COLLECTION_GUIDANCE: context.collectionGuidance,
-    REVIEW_INPUT: context.content
+    REVIEW_INPUT: context.content,
+    OUTPUT_SCHEMA: JSON.stringify(readOutputSchema(REVIEW_SCHEMA), null, 2)
   });
 }
 

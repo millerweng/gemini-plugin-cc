@@ -27,6 +27,48 @@ test("renderReviewResult degrades gracefully when JSON is missing required revie
   assert.match(output, /Raw final message:/);
 });
 
+test("renderReviewResult renders a structured result when next_steps is absent", () => {
+  const parsed = {
+    verdict: "needs-attention",
+    summary: "Denylist is incomplete.",
+    findings: [
+      {
+        file: "src/context.py",
+        line_start: 9,
+        line_end: 18,
+        confidence: 1.0,
+        recommendation: "Add /proc, /sys, /dev to DANGEROUS_SYSTEM_ROOTS."
+      }
+    ]
+  };
+  const output = renderReviewResult(
+    { parsed, rawOutput: JSON.stringify(parsed), parseError: null },
+    { reviewLabel: "Review", targetLabel: "branch diff against master" }
+  );
+
+  assert.doesNotMatch(output, /unexpected review shape/);
+  assert.doesNotMatch(output, /Missing array/);
+  assert.match(output, /Verdict: needs-attention/);
+  assert.match(output, /Findings:/);
+  assert.match(output, /src\/context\.py:9-18/);
+  assert.match(output, /Add \/proc/);
+});
+
+test("renderReviewResult flags next_steps when present but not an array", () => {
+  const parsed = {
+    verdict: "approve",
+    summary: "Fine.",
+    findings: [],
+    next_steps: "do the thing"
+  };
+  const output = renderReviewResult(
+    { parsed, rawOutput: JSON.stringify(parsed), parseError: null },
+    { reviewLabel: "Review", targetLabel: "working tree diff" }
+  );
+
+  assert.match(output, /`next_steps` must be an array when present/);
+});
+
 test("renderStoredJobResult prefers rendered output for structured review jobs", () => {
   const output = renderStoredJobResult(
     {

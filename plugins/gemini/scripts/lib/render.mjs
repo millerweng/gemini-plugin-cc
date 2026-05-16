@@ -34,8 +34,8 @@ function validateReviewResultShape(data) {
   if (!Array.isArray(data.findings)) {
     return "Missing array `findings`.";
   }
-  if (!Array.isArray(data.next_steps)) {
-    return "Missing array `next_steps`.";
+  if (data.next_steps !== undefined && !Array.isArray(data.next_steps)) {
+    return "Field `next_steps` must be an array when present.";
   }
   return null;
 }
@@ -64,7 +64,7 @@ function normalizeReviewResultData(data) {
     verdict: data.verdict.trim(),
     summary: data.summary.trim(),
     findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
-    next_steps: data.next_steps
+    next_steps: (Array.isArray(data.next_steps) ? data.next_steps : [])
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
   };
