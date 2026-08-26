@@ -20,6 +20,18 @@
   an explicit `--source`.
 - Git commands no longer pass repository-derived arguments through a shell on
   Windows (codex-plugin-cc #447).
+- Fixed `/gemini:review` failing with `Missing array next_steps` and dumping raw
+  JSON instead of a rendered review. The prompts promised Gemini a schema it was
+  never shown, and the renderer hard-rejected any response without `next_steps`.
+  The real schema is now injected into the prompt, and `next_steps` is optional at
+  render time. Upstream PR #5 by @petems, fixes upstream issue #4.
+- Fixed the companion resolving its state directory into another plugin's data
+  directory. `CLAUDE_PLUGIN_DATA` can point at the Codex plugin, whose state layout
+  is identical, so this client would load Codex's broker session, dial the Codex
+  app-server and fail every task with `unknown variant 'session/new'`. The
+  directory is now checked for ownership, and a wrong-dialect broker reply falls
+  back to the direct transport and forgets the endpoint. Fixes upstream issue #8,
+  reported with a verified fix by @mplezier.
 
 ## 1.0.0
 

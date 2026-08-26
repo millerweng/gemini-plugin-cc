@@ -19,6 +19,12 @@
 > - **Git arguments no longer pass through a shell on Windows**, matching
 >   codex-plugin-cc #447.
 >
+> It also carries two fixes for problems reported upstream but not yet released there:
+> `/gemini:review` no longer fails with `Missing array next_steps` (upstream PR #5 by
+> @petems), and the companion no longer resolves its state into the Codex plugin's
+> data directory and dials the wrong server (upstream issue #8, reported with a
+> verified fix by @mplezier).
+>
 > All credit for the plugin itself goes upstream. Apache-2.0, same as the original.
 
 ## Installation
