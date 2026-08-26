@@ -21,18 +21,19 @@ function formatLineRange(finding) {
   return `:${finding.line_start}-${finding.line_end}`;
 }
 
+// Showing the model a schema does not make it follow one. In practice Gemini returns
+// findings with no `verdict`, or a summary with no `next_steps`. Dumping the raw JSON
+// at the user over a missing label throws away a review it already paid for, so only
+// bail out when the payload carries no review content at all. Everything else is
+// filled in below and flagged as inferred.
 function validateReviewResultShape(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return "Expected a top-level JSON object.";
   }
-  if (typeof data.verdict !== "string" || !data.verdict.trim()) {
-    return "Missing string `verdict`.";
-  }
-  if (typeof data.summary !== "string" || !data.summary.trim()) {
-    return "Missing string `summary`.";
-  }
-  if (!Array.isArray(data.findings)) {
-    return "Missing array `findings`.";
+  const hasFindings = Array.isArray(data.findings);
+  const hasSummary = typeof data.summary === "string" && data.summary.trim();
+  if (!hasFindings && !hasSummary) {
+    return "No `findings` array and no `summary` string — nothing reviewable in the payload.";
   }
   if (data.next_steps !== undefined && !Array.isArray(data.next_steps)) {
     return "Field `next_steps` must be an array when present.";
@@ -49,9 +50,14 @@ function normalizeReviewFinding(finding, index) {
       : lineStart;
 
   return {
-    severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
+    // Defaulting a missing severity to "low" invents a rating the model never gave,
+    // and an unrated finding can just as easily be critical.
+    severity:
+      typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "unrated",
     title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
-    body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
+    // Empty when absent so the renderer can skip the line instead of printing filler
+    // above a recommendation that already carries the detail.
+    body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "",
     file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
     line_start: lineStart,
     line_end: lineEnd,
@@ -60,13 +66,40 @@ function normalizeReviewFinding(finding, index) {
 }
 
 function normalizeReviewResultData(data) {
+  const inferred = [];
+
+  const findings = (Array.isArray(data.findings) ? data.findings : []).map((finding, index) =>
+    normalizeReviewFinding(finding, index)
+  );
+  if (!Array.isArray(data.findings)) {
+    inferred.push("findings");
+  }
+
+  let verdict;
+  if (typeof data.verdict === "string" && data.verdict.trim()) {
+    verdict = data.verdict.trim();
+  } else {
+    // A review that raised findings is not an approval.
+    verdict = findings.length > 0 ? "needs-attention" : "approve";
+    inferred.push("verdict");
+  }
+
+  let summary;
+  if (typeof data.summary === "string" && data.summary.trim()) {
+    summary = data.summary.trim();
+  } else {
+    summary = "";
+    inferred.push("summary");
+  }
+
   return {
-    verdict: data.verdict.trim(),
-    summary: data.summary.trim(),
-    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
+    verdict,
+    summary,
+    findings,
     next_steps: (Array.isArray(data.next_steps) ? data.next_steps : [])
       .filter((step) => typeof step === "string" && step.trim())
-      .map((step) => step.trim())
+      .map((step) => step.trim()),
+    inferred
   };
 }
 
@@ -254,10 +287,19 @@ export function renderReviewResult(parsedResult, meta) {
     "",
     `Target: ${meta.targetLabel}`,
     `Verdict: ${data.verdict}`,
-    "",
-    data.summary,
     ""
   ];
+
+  if (data.summary) {
+    lines.push(data.summary, "");
+  }
+
+  if (data.inferred.length > 0) {
+    lines.push(
+      `Note: Gemini omitted ${data.inferred.map((field) => `\`${field}\``).join(", ")}; filled in from the rest of the response.`,
+      ""
+    );
+  }
 
   if (findings.length === 0) {
     lines.push("No material findings.");
@@ -266,7 +308,9 @@ export function renderReviewResult(parsedResult, meta) {
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
       lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
-      lines.push(`  ${finding.body}`);
+      if (finding.body) {
+        lines.push(`  ${finding.body}`);
+      }
       if (finding.recommendation) {
         lines.push(`  Recommendation: ${finding.recommendation}`);
       }
