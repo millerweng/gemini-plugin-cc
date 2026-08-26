@@ -16,7 +16,7 @@ import {
   BROKER_ENDPOINT_ENV,
   GeminiAcpClient
 } from "./acp-client.mjs";
-import { loadBrokerSession } from "./broker-lifecycle.mjs";
+import { clearBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
 import { resolveStateDir } from "./state.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
@@ -293,13 +293,32 @@ async function withAcpClient(cwd, fn) {
   } catch (error) {
     const brokerRequested =
       client?.transport === "broker" || Boolean(process.env[BROKER_ENDPOINT_ENV]);
+    // A broker endpoint that answers but speaks another dialect is a foreign server —
+    // in practice the Codex plugin's app-server, which shares this state layout. It
+    // accepts `initialize` and then rejects `session/new`. Treat that like a dead
+    // broker: fall back to direct, and forget the endpoint so the next run does not
+    // dial it again.
+    const dialectMismatch =
+      client?.transport === "broker" &&
+      (error?.rpcCode === -32600 ||
+        error?.rpcCode === -32601 ||
+        /unknown variant|method not found/i.test(String(error?.message ?? "")));
     const shouldRetryDirect =
       (client?.transport === "broker" && error?.rpcCode === BROKER_BUSY_RPC_CODE) ||
+      dialectMismatch ||
       (brokerRequested && (error?.code === "ENOENT" || error?.code === "ECONNREFUSED"));
 
     if (client) {
       await client.close().catch(() => {});
       client = null;
+    }
+
+    if (dialectMismatch) {
+      try {
+        clearBrokerSession(cwd);
+      } catch {
+        // Best effort: the retry below still uses the direct transport.
+      }
     }
 
     if (!shouldRetryDirect) throw error;

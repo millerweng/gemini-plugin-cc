@@ -14,7 +14,7 @@ const COMPANION_SCRIPT = path.resolve(
 );
 
 function seedState(workspace, jobs) {
-  const pluginDataDir = path.join(workspace, ".plugin-data");
+  const pluginDataDir = path.join(workspace, "gemini-plugin-data");
   fs.mkdirSync(pluginDataDir, { recursive: true });
   const prev = process.env.CLAUDE_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;

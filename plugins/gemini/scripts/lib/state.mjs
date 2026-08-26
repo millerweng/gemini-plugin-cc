@@ -12,6 +12,15 @@ const STATE_FILE_NAME = "state.json";
 const JOBS_DIR_NAME = "jobs";
 const MAX_JOBS = 50;
 
+// CLAUDE_PLUGIN_DATA carries whichever plugin's directory the surrounding shell holds,
+// which is not always this one. The Codex plugin is a structural twin — same
+// state/<slug>-<hash>/broker.json layout, same workspace hashing — so trusting a
+// foreign directory makes both plugins resolve to one state file, and this client
+// then dials the Codex broker and dies on the first `session/new`.
+export function ownsPluginDataDir(pluginDataDir) {
+  return /^gemini([-.]|$)/i.test(path.basename(pluginDataDir));
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -39,7 +48,10 @@ export function resolveStateDir(cwd) {
   const slug = slugSource.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "workspace";
   const hash = createHash("sha256").update(canonicalWorkspaceRoot).digest("hex").slice(0, 16);
   const pluginDataDir = process.env[PLUGIN_DATA_ENV];
-  const stateRoot = pluginDataDir ? path.join(pluginDataDir, "state") : FALLBACK_STATE_ROOT_DIR;
+  const stateRoot =
+    pluginDataDir && ownsPluginDataDir(pluginDataDir)
+      ? path.join(pluginDataDir, "state")
+      : FALLBACK_STATE_ROOT_DIR;
   return path.join(stateRoot, `${slug}-${hash}`);
 }
 

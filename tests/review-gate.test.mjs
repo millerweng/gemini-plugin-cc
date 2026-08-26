@@ -14,7 +14,7 @@ const HOOK_SCRIPT = path.resolve(
 );
 
 function runHook(workspace, { gateEnabled = false, geminiAvailable = false } = {}) {
-  const pluginDataDir = path.join(workspace, ".plugin-data");
+  const pluginDataDir = path.join(workspace, "gemini-plugin-data");
   fs.mkdirSync(pluginDataDir, { recursive: true });
 
   const origEnv = process.env.CLAUDE_PLUGIN_DATA;
