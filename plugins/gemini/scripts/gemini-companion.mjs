@@ -420,7 +420,10 @@ async function executeReviewRun(request) {
       reasoningSummary: result.reasoningSummary,
       inputMode: context.inputMode,
       fileCount: context.fileCount,
-      diffBytes: context.diffBytes
+      diffBytes: context.diffBytes,
+      baseRef: context.target.baseRef ?? null,
+      baseWasDetected: context.target.explicit === false,
+      mergeBase: context.comparison?.mergeBase ?? null
     }),
     summary:
       parsed.parsed?.summary ??

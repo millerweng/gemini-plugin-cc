@@ -850,38 +850,52 @@ export async function runAcpReview(cwd, options = {}) {
 // -----------------------------------------------------------------------------
 
 export function parseStructuredOutput(rawOutput, fallback = {}) {
+  // `??` lets an empty string through, and callers build failureMessage from
+  // `error?.message ?? stderr` — which is "" whenever Gemini exits without writing to
+  // stderr. That produced a bare "Parse error:" with nothing after it.
+  const failureMessage =
+    typeof fallback.failureMessage === "string" && fallback.failureMessage.trim()
+      ? fallback.failureMessage.trim()
+      : null;
+
+  // Spread first so the fields set below always win. A fallback key colliding with
+  // `parsed` or `parseError` would otherwise overwrite the real result.
   if (!rawOutput) {
     return {
+      ...fallback,
       parsed: null,
-      parseError: fallback.failureMessage ?? "Gemini did not return a final structured message.",
-      rawOutput: rawOutput ?? "",
-      ...fallback
+      parseError:
+        failureMessage ??
+        "Gemini exited without a final message. Nothing was returned to parse — check the job stderr for why the turn ended.",
+      rawOutput: rawOutput ?? ""
     };
   }
 
   const candidate = extractJsonBlock(rawOutput);
   if (!candidate) {
     return {
+      ...fallback,
       parsed: null,
-      parseError: "Gemini did not return a JSON block.",
-      rawOutput,
-      ...fallback
+      parseError: failureMessage
+        ? `Gemini did not return a JSON block (${failureMessage}).`
+        : "Gemini did not return a JSON block.",
+      rawOutput
     };
   }
 
   try {
     return {
+      ...fallback,
       parsed: JSON.parse(candidate),
       parseError: null,
-      rawOutput,
-      ...fallback
+      rawOutput
     };
   } catch (error) {
     return {
+      ...fallback,
       parsed: null,
-      parseError: error.message,
-      rawOutput,
-      ...fallback
+      parseError: `Gemini returned a JSON block that does not parse: ${error.message}`,
+      rawOutput
     };
   }
 }

@@ -185,3 +185,69 @@ test("renderReviewResult stays quiet about input mode when the diff was inlined"
 
   assert.doesNotMatch(output, /too large to inline/);
 });
+
+// Regression: parseError was built from `error?.message ?? stderr`, and `??` lets an
+// empty string through, so a Gemini exit with no stderr rendered a bare
+// "- Parse error:" with nothing after it.
+test("renderReviewResult explains itself when there is no parse error text", () => {
+  const output = renderReviewResult(
+    { parsed: null, rawOutput: "", parseError: "" },
+    { reviewLabel: "Review", targetLabel: "working tree diff" }
+  );
+
+  assert.match(output, /did not return valid structured JSON/);
+  assert.match(output, /no reason reported/);
+  assert.doesNotMatch(output, /Parse error:\s*$/m);
+});
+
+test("renderReviewResult warns when an auto-detected base covers a huge range", () => {
+  const parsed = { verdict: "approve", summary: "Fine.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "branch diff against main",
+      baseRef: "main",
+      baseWasDetected: true,
+      fileCount: 279,
+      mergeBase: "3d3a1b40aaaaaaaa"
+    }
+  );
+
+  assert.match(output, /base `main` was auto-detected/);
+  assert.match(output, /279 files/);
+  assert.match(output, /merge-base 3d3a1b40/);
+  assert.match(output, /rerun with `--base <ref>`/);
+});
+
+test("an explicitly chosen base is never second-guessed", () => {
+  const parsed = { verdict: "approve", summary: "Fine.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "branch diff against origin/internal-release",
+      baseRef: "origin/internal-release",
+      baseWasDetected: false,
+      fileCount: 279
+    }
+  );
+
+  assert.doesNotMatch(output, /auto-detected/);
+});
+
+test("a small auto-detected range does not warn", () => {
+  const parsed = { verdict: "approve", summary: "Fine.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "branch diff against main",
+      baseRef: "main",
+      baseWasDetected: true,
+      fileCount: 3
+    }
+  );
+
+  assert.doesNotMatch(output, /auto-detected/);
+});

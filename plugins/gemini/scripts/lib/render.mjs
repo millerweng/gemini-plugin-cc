@@ -243,12 +243,18 @@ export function renderSetupReport(report) {
 
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
+    // An empty parseError renders as a bare label with nothing after it, which tells
+    // the reader nothing about what went wrong.
+    const reason =
+      typeof parsedResult.parseError === "string" && parsedResult.parseError.trim()
+        ? parsedResult.parseError.trim()
+        : "no reason reported — Gemini produced no final message and no error";
     const lines = [
       `# Gemini ${meta.reviewLabel}`,
       "",
       "Gemini did not return valid structured JSON.",
       "",
-      `- Parse error: ${parsedResult.parseError}`
+      `- Parse error: ${reason}`
     ];
 
     if (parsedResult.rawOutput) {
@@ -297,6 +303,17 @@ export function renderReviewResult(parsedResult, meta) {
   if (data.inferred.length > 0) {
     lines.push(
       `Note: Gemini omitted ${data.inferred.map((field) => `\`${field}\``).join(", ")}; filled in from the rest of the response.`,
+      ""
+    );
+  }
+
+  // An auto-detected base follows origin/HEAD, which points at the repo's default
+  // branch. On a long-lived integration branch that base can sit hundreds of commits
+  // back, and the review then covers everything since — not the change at hand. Show
+  // the range so a wrong base is visible instead of silently reviewed.
+  if (meta.baseRef && meta.baseWasDetected && Number.isFinite(meta.fileCount) && meta.fileCount > 40) {
+    lines.push(
+      `Warning: base \`${meta.baseRef}\` was auto-detected and the range covers ${meta.fileCount} files${meta.mergeBase ? ` since merge-base ${meta.mergeBase.slice(0, 8)}` : ""}. If that is wider than the change you meant to review, rerun with \`--base <ref>\`.`,
       ""
     );
   }
