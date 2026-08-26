@@ -33,6 +33,17 @@
   back to the direct transport and forgets the endpoint. Fixes upstream issue #8,
   reported with a verified fix by @mplezier.
 
+- Stopped sending small diffs down the self-collect path. `maxInlineFiles` was 2, so
+  any change touching three files skipped the inline diff no matter how small it was —
+  a 365-byte three-file diff qualified. Gemini was then told to fetch the diff itself
+  with git, which an ACP session cannot do, and it returned `approve` inferred from
+  diffstat line counts. The byte budget now decides; the file count is a loose guard
+  at 60.
+- When the diff genuinely does not fit, the prompt now forbids `approve` without
+  evidence: Gemini must say which evidence it could not obtain and return
+  `needs-attention`. The rendered output carries a warning naming the size that
+  triggered it, so a verdict reached without the diff cannot pass for a reviewed one.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.

@@ -301,6 +301,22 @@ export function renderReviewResult(parsedResult, meta) {
     );
   }
 
+  // The diff did not fit in the prompt, so Gemini had to fetch the changes itself. An
+  // ACP session may not be able to, and a verdict reached without the diff is worth
+  // nothing — say so rather than letting it read as a reviewed result.
+  if (meta.inputMode === "self-collect") {
+    const scale = [
+      Number.isFinite(meta.fileCount) ? `${meta.fileCount} files` : null,
+      Number.isFinite(meta.diffBytes) ? `${Math.ceil(meta.diffBytes / 1024)} KB of diff` : null
+    ]
+      .filter(Boolean)
+      .join(", ");
+    lines.push(
+      `Warning: the diff was too large to inline${scale ? ` (${scale})` : ""}, so Gemini was asked to read the changes itself. Confirm the findings reference real code before acting on this verdict.`,
+      ""
+    );
+  }
+
   if (findings.length === 0) {
     lines.push("No material findings.");
   } else {

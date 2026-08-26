@@ -156,3 +156,32 @@ test("renderReviewResult still degrades when the payload has no review content",
   assert.match(output, /nothing reviewable/);
   assert.match(output, /Raw final message:/);
 });
+
+test("renderReviewResult warns when Gemini had to fetch the diff itself", () => {
+  const parsed = { verdict: "approve", summary: "Routine bump.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      inputMode: "self-collect",
+      fileCount: 3,
+      diffBytes: 300 * 1024
+    }
+  );
+
+  assert.match(output, /too large to inline/);
+  assert.match(output, /3 files/);
+  assert.match(output, /300 KB of diff/);
+  assert.match(output, /Confirm the findings reference real code/);
+});
+
+test("renderReviewResult stays quiet about input mode when the diff was inlined", () => {
+  const parsed = { verdict: "approve", summary: "Routine bump.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    { reviewLabel: "Review", targetLabel: "working tree diff", inputMode: "inline-diff" }
+  );
+
+  assert.doesNotMatch(output, /too large to inline/);
+});

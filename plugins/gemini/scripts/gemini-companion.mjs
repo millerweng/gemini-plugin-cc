@@ -417,7 +417,10 @@ async function executeReviewRun(request) {
     rendered: renderReviewResult(parsed, {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
-      reasoningSummary: result.reasoningSummary
+      reasoningSummary: result.reasoningSummary,
+      inputMode: context.inputMode,
+      fileCount: context.fileCount,
+      diffBytes: context.diffBytes
     }),
     summary:
       parsed.parsed?.summary ??

@@ -6,7 +6,11 @@ import { formatCommandFailure, runCommand, runCommandChecked } from "./process.m
 
 const MAX_UNTRACKED_BYTES = 24 * 1024;
 const MAX_AGGREGATE_UNTRACKED_BYTES = 128 * 1024;
-const DEFAULT_INLINE_DIFF_MAX_FILES = 2;
+// The byte budget is what actually decides whether a diff fits in the prompt. The file
+// count is only a guard against a diff spread so thin that the per-file scaffolding
+// dominates; it used to be 2, which sent a 365-byte three-file diff down the
+// self-collect path where Gemini has no way to fetch the diff at all.
+const DEFAULT_INLINE_DIFF_MAX_FILES = 60;
 const DEFAULT_INLINE_DIFF_MAX_BYTES = 256 * 1024;
 
 // Git is directly executable on Windows. Repository-derived arguments must never pass through a shell.
@@ -335,7 +339,17 @@ function buildAdversarialCollectionGuidance(options = {}) {
     return "Use the repository context below as primary evidence.";
   }
 
-  return "The repository context below is a lightweight summary. Inspect the target diff yourself with read-only git commands before finalizing findings.";
+  // An ACP session has no shell, so "go run git yourself" is an instruction Gemini
+  // often cannot follow. Telling it to try anyway and saying nothing about what to do
+  // on failure produced an `approve` verdict derived from diffstat line counts alone.
+  // The one thing that must never happen is a clean bill of health with no evidence.
+  return [
+    "The repository context below is a summary only — the diff itself was too large to inline.",
+    "Read the changed files with whatever read-only tools you have before finalizing findings.",
+    "If you cannot retrieve the actual changes, do NOT return `approve`.",
+    "Say plainly in the summary which evidence you could not obtain, and return `needs-attention`.",
+    "Never infer a verdict from diffstat line counts or filenames alone."
+  ].join(" ");
 }
 
 export function collectReviewContext(cwd, target, options = {}) {

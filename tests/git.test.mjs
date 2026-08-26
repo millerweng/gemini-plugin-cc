@@ -132,12 +132,14 @@ test("collectReviewContext falls back to lightweight context for larger adversar
   fs.writeFileSync(path.join(cwd, "c.js"), 'export const value = "SELF_COLLECT_MARKER_C";\n');
 
   const target = resolveReviewTarget(cwd, {});
-  const context = collectReviewContext(cwd, target);
+  // Forced rather than size-triggered: this asserts what the lightweight context looks
+  // like. Which sizes select it is covered by the threshold tests further down.
+  const context = collectReviewContext(cwd, target, { includeDiff: false });
 
   assert.equal(context.inputMode, "self-collect");
   assert.equal(context.fileCount, 3);
-  assert.match(context.collectionGuidance, /lightweight summary/i);
-  assert.match(context.collectionGuidance, /read-only git commands/i);
+  assert.match(context.collectionGuidance, /summary only/i);
+  assert.match(context.collectionGuidance, /read-only tools/i);
   assert.doesNotMatch(context.content, /SELF_COLLECT_MARKER_[ABC]/);
   assert.match(context.content, /## Changed Files/);
 });
@@ -173,11 +175,53 @@ test("collectReviewContext keeps untracked file content in lightweight working t
   fs.writeFileSync(path.join(cwd, "new-risk.js"), 'export const value = "UNTRACKED_RISK_MARKER";\n');
 
   const target = resolveReviewTarget(cwd, {});
-  const context = collectReviewContext(cwd, target);
+  const context = collectReviewContext(cwd, target, { includeDiff: false });
 
   assert.equal(context.inputMode, "self-collect");
   assert.equal(context.fileCount, 3);
   assert.doesNotMatch(context.content, /TRACKED_MARKER_[AB]/);
   assert.match(context.content, /## Untracked Files/);
   assert.match(context.content, /UNTRACKED_RISK_MARKER/);
+});
+
+// Regression: maxInlineFiles was 2, so a three-file 365-byte diff was declared too
+// large to inline and Gemini was told to fetch it itself. In an ACP session it cannot,
+// and it returned `approve` inferred from diffstat line counts.
+test("a small diff spread over more than two files is still inlined", () => {
+  const cwd = makeTempDir("inline-files-");
+  initGitRepo(cwd);
+  for (const name of ["one.toml", "two.toml", "three.toml"]) {
+    fs.writeFileSync(path.join(cwd, name), "value = 1\n");
+  }
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  for (const name of ["one.toml", "two.toml", "three.toml"]) {
+    fs.writeFileSync(path.join(cwd, name), "value = 2\n");
+  }
+
+  const target = resolveReviewTarget(cwd, {});
+  const context = collectReviewContext(cwd, target, {});
+
+  assert.equal(context.fileCount, 3);
+  assert.ok(context.diffBytes < 4096, `expected a small diff, got ${context.diffBytes}`);
+  assert.equal(context.inputMode, "inline-diff");
+  assert.match(context.collectionGuidance, /primary evidence/);
+});
+
+test("a diff over the byte budget falls back to self-collect", () => {
+  const cwd = makeTempDir("inline-bytes-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "big.txt"), `${"x".repeat(300 * 1024)}\n`);
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  fs.writeFileSync(path.join(cwd, "big.txt"), `${"y".repeat(300 * 1024)}\n`);
+
+  const target = resolveReviewTarget(cwd, {});
+  const context = collectReviewContext(cwd, target, {});
+
+  assert.equal(context.inputMode, "self-collect");
+  // Without the diff, a clean verdict is worthless — the prompt must forbid it.
+  assert.match(context.collectionGuidance, /do NOT return `approve`/);
+  assert.match(context.collectionGuidance, /needs-attention/);
+  assert.match(context.collectionGuidance, /Never infer a verdict from diffstat/);
 });
