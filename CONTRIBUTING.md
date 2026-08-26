@@ -13,7 +13,7 @@ Thank you for your interest in contributing! This guide covers the process for r
 ### Dev Setup
 
 ```bash
-git clone https://github.com/m-ghalib/gemini-plugin-cc.git
+git clone https://github.com/millerweng/gemini-plugin-cc.git
 cd gemini-plugin-cc
 npm install
 npm test
@@ -46,8 +46,8 @@ tests/              # Test suite
 
 ## Reporting Issues
 
-- Use the [bug report template](https://github.com/m-ghalib/gemini-plugin-cc/issues/new?template=bug_report.yml) for bugs
-- Use the [feature request template](https://github.com/m-ghalib/gemini-plugin-cc/issues/new?template=feature_request.yml) for ideas
+- Use the [bug report template](https://github.com/millerweng/gemini-plugin-cc/issues/new?template=bug_report.yml) for bugs
+- Use the [feature request template](https://github.com/millerweng/gemini-plugin-cc/issues/new?template=feature_request.yml) for ideas
 - Check existing issues before opening a duplicate
 - Include your Gemini CLI version (`gemini --version`) and Node.js version
 

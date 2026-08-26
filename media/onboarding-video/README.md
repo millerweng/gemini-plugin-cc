@@ -14,7 +14,7 @@ published marketplace metadata.
 
 The GIF shows one deterministic Claude Code terminal workflow:
 
-1. Add the plugin marketplace: `/plugin marketplace add m-ghalib/gemini-plugin-cc`.
+1. Add the plugin marketplace: `/plugin marketplace add millerweng/gemini-plugin-cc`.
 2. Install the plugin: `/plugin install gemini@gemini-plugin-cc`.
 3. Reload plugins.
 4. Verify the pinned Gemini CLI and auth path through `/gemini:setup --verify`.

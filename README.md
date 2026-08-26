@@ -6,10 +6,25 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-blue.svg)](package.json)
 [![Tests](https://img.shields.io/badge/tests-npm-green.svg)](tests/)
 
+> **Fork notice.** This is a fork of [m-ghalib/gemini-plugin-cc](https://github.com/m-ghalib/gemini-plugin-cc)
+> with three changes on top of upstream 1.0.0:
+>
+> - **OAuth readiness is no longer misreported.** Upstream probes for
+>   `~/.gemini/gemini-credentials.json`, a filename Gemini CLI does not write, so every
+>   OAuth user was told they were logged out. `setup --verify` compounded it by refusing
+>   to connect before the probe passed. The probe now looks for `oauth_creds.json`, and a
+>   successful ACP handshake overrides whatever the probe found on disk.
+> - **`/gemini:transfer` is new.** It carries the current Claude Code session into a
+>   resumable Gemini session.
+> - **Git arguments no longer pass through a shell on Windows**, matching
+>   codex-plugin-cc #447.
+>
+> All credit for the plugin itself goes upstream. Apache-2.0, same as the original.
+
 ## Installation
 
 ```text
-/plugin marketplace add m-ghalib/gemini-plugin-cc
+/plugin marketplace add millerweng/gemini-plugin-cc
 /plugin install gemini@gemini-plugin-cc
 /reload-plugins
 /gemini:setup --verify
