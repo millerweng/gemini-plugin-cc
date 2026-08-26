@@ -29,7 +29,11 @@ function defaultState() {
   return {
     version: STATE_VERSION,
     config: {
-      stopReviewGate: false
+      stopReviewGate: false,
+      // Base ref reviews compare against when --base is not given. Auto-detection
+      // follows origin/HEAD, which is wrong for repositories that merge into a
+      // long-lived integration branch instead of the default branch.
+      reviewBase: null
     },
     jobs: []
   };

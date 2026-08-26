@@ -44,6 +44,23 @@
   `needs-attention`. The rendered output carries a warning naming the size that
   triggered it, so a verdict reached without the diff cannot pass for a reviewed one.
 
+- Fixed an empty `- Parse error:` line. Callers build the failure message as
+  `error?.message ?? stderr`, and `??` lets an empty string through, so a Gemini exit
+  with no stderr reported no reason at all. Each branch now says what happened, and
+  the renderer refuses to print an empty label. The caller's fallback object is also
+  spread first, so a colliding key can no longer overwrite `parsed`/`parseError`.
+- Added a per-workspace default review base: `/gemini:setup --set-review-base <ref>`
+  (and `--clear-review-base`). Auto-detection follows `origin/HEAD`, which is the
+  default branch — on a repository that merges into a long-lived integration branch
+  the merge-base sits far back and every review silently covers everything since. The
+  ref is validated when it is set rather than failing later inside `merge-base`.
+- Reviews now name an auto-detected base along with the file count and merge-base
+  whenever the range exceeds 40 files, and point at `--base` / `--set-review-base`. A
+  base passed as a flag or read from config is never second-guessed.
+- Added `--cwd <path>` to both review commands' `argument-hint`. The companion already
+  accepted it, but nothing advertised it, so there was no visible way to review a
+  worktree other than the one the session runs in.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.

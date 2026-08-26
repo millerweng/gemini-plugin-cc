@@ -1,6 +1,6 @@
 ---
-description: Check whether the local Gemini CLI is ready and optionally toggle the stop-time review gate
-argument-hint: '[--verify] [--enable-review-gate|--disable-review-gate]'
+description: Check whether the local Gemini CLI is ready, toggle the stop-time review gate, or set the default review base
+argument-hint: '[--verify] [--enable-review-gate|--disable-review-gate] [--set-review-base <ref>|--clear-review-base]'
 allowed-tools: Bash(node:*), Bash(npm:*), AskUserQuestion
 ---
 

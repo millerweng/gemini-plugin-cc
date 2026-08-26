@@ -28,7 +28,7 @@ import {
 } from "./lib/claude-session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
-import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
+import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   generateJobId,
@@ -210,6 +210,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     auth: authStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
+    reviewBase: config.reviewBase ?? null,
     actionsTaken,
     nextSteps
   };
@@ -217,12 +218,21 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd"],
-    booleanOptions: ["json", "verify", "enable-review-gate", "disable-review-gate"]
+    valueOptions: ["cwd", "set-review-base"],
+    booleanOptions: [
+      "json",
+      "verify",
+      "enable-review-gate",
+      "disable-review-gate",
+      "clear-review-base"
+    ]
   });
 
   if (options["enable-review-gate"] && options["disable-review-gate"]) {
     throw new Error("Choose either --enable-review-gate or --disable-review-gate.");
+  }
+  if (options["set-review-base"] && options["clear-review-base"]) {
+    throw new Error("Choose either --set-review-base <ref> or --clear-review-base.");
   }
 
   const cwd = resolveCommandCwd(options);
@@ -235,6 +245,24 @@ async function handleSetup(argv) {
   } else if (options["disable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", false);
     actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);
+  }
+
+  if (options["set-review-base"]) {
+    const ref = String(options["set-review-base"]).trim();
+    // Reviewing against a ref that does not resolve fails later with a confusing
+    // merge-base error, so reject it while the user is still looking at this command.
+    const resolved = runCommand("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd,
+      shell: false
+    });
+    if (resolved.status !== 0) {
+      throw new Error(`Cannot resolve "${ref}" to a commit in ${cwd}. Fetch it first, or pass a ref that exists.`);
+    }
+    setConfig(workspaceRoot, "reviewBase", ref);
+    actionsTaken.push(`Reviews in ${workspaceRoot} now default to base ${ref}.`);
+  } else if (options["clear-review-base"]) {
+    setConfig(workspaceRoot, "reviewBase", null);
+    actionsTaken.push(`Cleared the default review base for ${workspaceRoot}; auto-detection applies again.`);
   }
 
   const finalReport = await buildSetupReport(cwd, actionsTaken);
@@ -422,7 +450,7 @@ async function executeReviewRun(request) {
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
       baseRef: context.target.baseRef ?? null,
-      baseWasDetected: context.target.explicit === false,
+      baseWasDetected: context.target.baseSource === "detected",
       mergeBase: context.comparison?.mergeBase ?? null
     }),
     summary:
@@ -699,10 +727,14 @@ async function handleReviewCommand(argv, config) {
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
+  // A configured base is a deliberate choice for this workspace, so it counts as
+  // explicit and is not second-guessed the way auto-detection is.
+  const configuredBase = getConfig(workspaceRoot).reviewBase || null;
   const target = resolveReviewTarget(cwd, {
-    base: options.base,
+    base: options.base ?? configuredBase,
     scope: options.scope
   });
+  target.baseSource = options.base ? "flag" : configuredBase ? "config" : "detected";
 
   const metadata = buildReviewJobMetadata(config.reviewName, target);
   const job = createCompanionJob({

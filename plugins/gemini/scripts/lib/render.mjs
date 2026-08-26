@@ -313,7 +313,7 @@ export function renderReviewResult(parsedResult, meta) {
   // the range so a wrong base is visible instead of silently reviewed.
   if (meta.baseRef && meta.baseWasDetected && Number.isFinite(meta.fileCount) && meta.fileCount > 40) {
     lines.push(
-      `Warning: base \`${meta.baseRef}\` was auto-detected and the range covers ${meta.fileCount} files${meta.mergeBase ? ` since merge-base ${meta.mergeBase.slice(0, 8)}` : ""}. If that is wider than the change you meant to review, rerun with \`--base <ref>\`.`,
+      `Warning: base \`${meta.baseRef}\` was auto-detected and the range covers ${meta.fileCount} files${meta.mergeBase ? ` since merge-base ${meta.mergeBase.slice(0, 8)}` : ""}. If that is wider than the change you meant to review, rerun with \`--base <ref>\`, or set a default once with \`/gemini:setup --set-review-base <ref>\`.`,
       ""
     );
   }
