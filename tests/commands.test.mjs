@@ -39,8 +39,17 @@ test("all expected commands are present", () => {
     "result.md",
     "review.md",
     "setup.md",
-    "status.md"
+    "status.md",
+    "transfer.md"
   ]);
+});
+
+test("transfer command forwards to the companion and keeps the resume hint", () => {
+  const source = read("commands/transfer.md");
+  assert.match(source, /gemini-companion\.mjs" transfer/);
+  assert.match(source, /\bBash\(/);
+  assert.match(source, /disable-model-invocation:\s*true/);
+  assert.match(source, /--session-file/);
 });
 
 test("rescue command routes through the gemini-rescue subagent via Agent tool (not context: fork)", () => {

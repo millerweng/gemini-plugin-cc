@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.0
+
+- Fixed `oauth-personal` always reporting "not authenticated". The probe looked for
+  `~/.gemini/gemini-credentials.json`, a name Gemini CLI does not write; it now finds
+  `oauth_creds.json` and still accepts the legacy name.
+- `setup --verify` no longer refuses to run when the credential file is missing. A
+  configured auth type always gets a real ACP handshake, and a successful handshake
+  overrides the on-disk probe. Credential layout is Gemini CLI's business and it
+  changes between releases, so a live session is the only trustworthy answer.
+- `auth.detail` now names the credential file it found, or lists the names it probed.
+- Added `/gemini:transfer`, which turns the current Claude Code session into a
+  resumable Gemini session and prints the `gemini --session-file` command. Ported
+  from codex-plugin-cc #374, which uses a Codex-only import RPC; this writes a
+  native Gemini JSONL session instead. Harness markup (slash-command echoes,
+  reminders) is stripped and tool payloads are collapsed unless
+  `--include-tool-output` is passed.
+- `SessionStart` now exports the transcript path so `/gemini:transfer` works without
+  an explicit `--source`.
+- Git commands no longer pass repository-derived arguments through a shell on
+  Windows (codex-plugin-cc #447).
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.

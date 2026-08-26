@@ -45,6 +45,7 @@ read-only planning run.
 | `/gemini:review` | Review code changes with structured findings |
 | `/gemini:adversarial-review` | Challenge implementation choices, tradeoffs, and assumptions |
 | `/gemini:rescue` | Delegate investigation, diagnosis, research, or fix work to Gemini |
+| `/gemini:transfer` | Hand the current Claude Code session over to a resumable Gemini session |
 | `/gemini:status` | Check active and recent Gemini jobs |
 | `/gemini:result` | Show the stored output of a finished job |
 | `/gemini:cancel` | Cancel an active background job |
@@ -157,6 +158,26 @@ Concrete model IDs are also accepted (e.g., `--model gemini-3-pro-preview`).
 /gemini:rescue --plan trace the data flow from API to database for the orders endpoint
 /gemini:rescue --model flash --effort high diagnose the memory leak in the worker pool
 ```
+
+---
+
+### `/gemini:transfer`
+
+Turns the current Claude Code session into a Gemini session and prints the command to resume it.
+
+Use it when a debugging or implementation conversation started in Claude Code and you want to carry that context into Gemini directly.
+
+```bash
+/gemini:transfer
+/gemini:transfer --source ~/.claude/projects/<project>/<session-id>.jsonl
+/gemini:transfer --include-tool-output
+```
+
+The `SessionStart` hook supplies the transcript path automatically; `--source` is a manual override. The source must live under `~/.claude/projects`.
+
+Claude-specific harness markup is stripped (slash-command echoes, injected reminders, task notifications), and tool calls collapse to a single summary line. Pass `--include-tool-output` to carry tool results over as well, truncated per result.
+
+The session is written as a native Gemini JSONL chat under `~/.gemini/tmp/<project>/chats/`, so `gemini --list-sessions` and `--resume` pick it up too.
 
 ---
 

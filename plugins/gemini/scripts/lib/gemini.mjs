@@ -38,6 +38,23 @@ function resolveTaskTimeoutMs() {
 const GEMINI_SETTINGS_FILE = path.join(os.homedir(), ".gemini", "settings.json");
 const TASK_SESSION_INDEX_FILE = ".gemini-task-sessions.json";
 
+// Gemini CLI writes OAuth credentials to oauth_creds.json. Older/other builds have
+// used gemini-credentials.json, so both names are probed before declaring a miss.
+// The file check is only a hint: `setup --verify` runs a real ACP handshake and
+// that result always wins over what is on disk.
+const OAUTH_CREDENTIAL_FILENAMES = ["oauth_creds.json", "gemini-credentials.json"];
+
+function findOauthCredentialFile() {
+  const geminiHome = path.join(os.homedir(), ".gemini");
+  for (const filename of OAUTH_CREDENTIAL_FILENAMES) {
+    const candidate = path.join(geminiHome, filename);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 // Effort → Gemini thinking controls. Gemini 3 uses thinkingLevel (low|medium|high);
 // Gemini 2.5 used thinkingBudget (int). We expose --effort low|medium|high and let
 // Gemini pick the right knob based on the current model.
@@ -424,7 +441,7 @@ export function readGeminiSettings(cwd) {
   return { resolved: merged, source: projectPath };
 }
 
-function describeAuthType(selectedType, env) {
+function describeAuthType(selectedType, env, details = {}) {
   switch (selectedType) {
     case "vertex-ai": {
       const project = env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT;
@@ -446,8 +463,13 @@ function describeAuthType(selectedType, env) {
         ? "Google API key configured"
         : "Google API key selected, but GOOGLE_API_KEY is unset";
     case "oauth-personal":
-    case "oauth":
-      return "Google OAuth (personal)";
+    case "oauth": {
+      if (details.oauthCredentialFile) {
+        return `Google OAuth (personal); credentials found at ${details.oauthCredentialFile}`;
+      }
+      const probed = OAUTH_CREDENTIAL_FILENAMES.join(", ");
+      return `Google OAuth (personal) selected, but no credential file was found in ~/.gemini (looked for ${probed}). Run \`setup --verify\` to test the login directly.`;
+    }
     case "gateway":
       return "AI API Gateway";
     default:
@@ -487,6 +509,7 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
   }
 
   let loggedIn = false;
+  let oauthCredentialFile = null;
   switch (selectedType) {
     case "vertex-ai":
       loggedIn = Boolean(
@@ -501,8 +524,8 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
       break;
     case "oauth-personal":
     case "oauth": {
-      const credsFile = path.join(os.homedir(), ".gemini", "gemini-credentials.json");
-      loggedIn = fs.existsSync(credsFile);
+      oauthCredentialFile = findOauthCredentialFile();
+      loggedIn = Boolean(oauthCredentialFile);
       break;
     }
     case "gateway": {
@@ -517,17 +540,22 @@ export async function getGeminiAuthStatus(cwd, options = {}) {
   return {
     available: true,
     loggedIn,
-    detail: describeAuthType(selectedType, env),
+    detail: describeAuthType(selectedType, env, { oauthCredentialFile }),
     source: "settings",
     authMethod: selectedType,
     verified: null,
-    provider: selectedType
+    provider: selectedType,
+    credentialFile: oauthCredentialFile
   };
 }
 
 export async function verifyGeminiConnectivity(cwd, options = {}) {
   const authStatus = await getGeminiAuthStatus(cwd, options);
-  if (!authStatus.loggedIn) {
+  // Only bail out when nothing is configured at all. A configured auth type whose
+  // credentials were not found on disk still gets a real ACP handshake: the file
+  // layout is Gemini CLI's business and it changes between releases, so a live
+  // session is the only trustworthy answer.
+  if (!authStatus.authMethod) {
     return { verified: false, detail: `Auth check failed: ${authStatus.detail}` };
   }
 

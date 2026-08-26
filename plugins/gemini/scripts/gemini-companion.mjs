@@ -21,6 +21,11 @@ import {
   runAcpTurn,
   verifyGeminiConnectivity
 } from "./lib/gemini.mjs";
+import {
+  convertClaudeTranscript,
+  resolveClaudeSessionPath,
+  writeGeminiSession
+} from "./lib/claude-session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
@@ -90,6 +95,7 @@ function printUsage() {
       "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
+      "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/gemini-companion.mjs result [job-id] [--json]",
       "  node scripts/gemini-companion.mjs cancel [job-id] [--json]"
@@ -237,7 +243,18 @@ async function handleSetup(argv) {
     const connectivity = await verifyGeminiConnectivity(cwd);
     finalReport.auth.verified = connectivity.verified;
     finalReport.auth.verifyDetail = connectivity.detail;
-    if (!connectivity.verified) {
+    if (connectivity.verified) {
+      // A live ACP session proves the login works. It outranks the on-disk
+      // credential probe, which only guesses at Gemini CLI's file layout.
+      if (!finalReport.auth.loggedIn) {
+        finalReport.auth.loggedIn = true;
+        finalReport.auth.source = "acp-handshake";
+        finalReport.nextSteps = (finalReport.nextSteps ?? []).filter(
+          (step) => !step.startsWith("Configure Gemini auth:") && !step.startsWith("For Vertex AI,")
+        );
+      }
+      finalReport.ready = finalReport.node.available && finalReport.gemini.available;
+    } else {
       finalReport.ready = false;
       finalReport.nextSteps = finalReport.nextSteps ?? [];
       finalReport.nextSteps.push(`Verification failed: ${connectivity.detail}`);
@@ -783,6 +800,44 @@ async function handleTask(argv) {
   );
 }
 
+function renderTransferResult(payload) {
+  const lines = [
+    "Transferred the Claude session into a Gemini session with visible turn history.",
+    `Gemini session ID: ${payload.sessionId}`,
+    `Turns carried over: ${payload.stats.user} from you, ${payload.stats.gemini} from the assistant`,
+    `Session file: ${payload.sessionFile}`,
+    "",
+    `Resume in Gemini: ${payload.resumeCommand}`,
+    `Or pick it from the list: ${payload.listCommand}`
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+async function handleTransfer(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "source"],
+    booleanOptions: ["json", "include-tool-output"]
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const sourcePath = resolveClaudeSessionPath(cwd, { source: options.source });
+  const { messages, stats } = convertClaudeTranscript(sourcePath, {
+    includeToolOutput: Boolean(options["include-tool-output"])
+  });
+  const written = writeGeminiSession(cwd, messages);
+
+  const payload = {
+    ...written,
+    stats,
+    sourcePath,
+    claudeSessionId: path.basename(sourcePath, ".jsonl"),
+    resumeCommand: `gemini --session-file ${written.sessionFile}`,
+    listCommand: "gemini --list-sessions"
+  };
+
+  outputCommandResult(payload, renderTransferResult(payload), options.json);
+}
+
 async function handleTaskWorker(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd", "job-id"]
@@ -984,6 +1039,9 @@ async function main() {
       break;
     case "task":
       await handleTask(argv);
+      break;
+    case "transfer":
+      await handleTransfer(argv);
       break;
     case "task-worker":
       await handleTaskWorker(argv);

@@ -176,3 +176,36 @@ test("resolveWaitTargetJob throws with --all hint when no session jobs active", 
     else process.env.CLAUDE_PLUGIN_DATA = prev;
   }
 });
+
+// /gemini:transfer needs the transcript path to work without an explicit --source,
+// and SessionStart is the only place Claude hands it over.
+test("SessionStart exports the session id and the transcript path", async () => {
+  const workspace = makeTempDir("hook-sessionstart-");
+  const envFile = path.join(workspace, "claude-env");
+  fs.writeFileSync(envFile, "");
+
+  const hookScript = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../plugins/gemini/scripts/session-lifecycle-hook.mjs"
+  );
+  const transcriptPath = path.join(workspace, "transcript.jsonl");
+
+  const { spawnSync } = await import("node:child_process");
+  const result = spawnSync(process.execPath, [hookScript, "SessionStart"], {
+    cwd: workspace,
+    input: JSON.stringify({
+      hook_event_name: "SessionStart",
+      session_id: "session-xyz",
+      transcript_path: transcriptPath,
+      cwd: workspace
+    }),
+    env: { ...process.env, CLAUDE_ENV_FILE: envFile, __GEMINI_HOOK_IMPORT_ONLY: "" },
+    encoding: "utf8",
+    timeout: 10000
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const exported = fs.readFileSync(envFile, "utf8");
+  assert.match(exported, /GEMINI_COMPANION_SESSION_ID='session-xyz'/);
+  assert.match(exported, new RegExp(`GEMINI_COMPANION_TRANSCRIPT_PATH='${transcriptPath}'`));
+});

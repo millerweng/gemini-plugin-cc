@@ -13,7 +13,7 @@ const SCRIPT = path.resolve(
   "../plugins/gemini/scripts/lib/gemini.mjs"
 );
 
-function runAuthProbe(env = {}) {
+function runAuthProbe(env = {}, options = {}) {
   const tmpHome = makeTempDir("auth-test-");
   const binDir = path.join(tmpHome, "bin");
   fs.mkdirSync(binDir);
@@ -26,10 +26,14 @@ function runAuthProbe(env = {}) {
     JSON.stringify({ security: { auth: { selectedType: env._AUTH_TYPE ?? "vertex-ai" } } })
   );
 
+  for (const filename of options.credentialFiles ?? []) {
+    fs.writeFileSync(path.join(settingsDir, filename), JSON.stringify({ access_token: "test" }));
+  }
+
   const wrapper = [
     `import { getGeminiAuthStatus } from ${JSON.stringify(SCRIPT)};`,
     `const result = await getGeminiAuthStatus(process.cwd(), { env: process.env });`,
-    `process.stdout.write(JSON.stringify({ loggedIn: result.loggedIn, authMethod: result.authMethod }));`
+    `process.stdout.write(JSON.stringify({ loggedIn: result.loggedIn, authMethod: result.authMethod, detail: result.detail, credentialFile: result.credentialFile ?? null }));`
   ].join("\n");
   const wrapperFile = path.join(tmpHome, "probe.mjs");
   fs.writeFileSync(wrapperFile, wrapper);
@@ -187,4 +191,38 @@ test("project-scoped settings are discovered when user-level settings are absent
   const result = stdout ? JSON.parse(stdout) : {};
   assert.equal(result.loggedIn, true);
   assert.equal(result.authMethod, "gemini-api-key");
+});
+
+// Regression: the OAuth probe used to look only for gemini-credentials.json, a name
+// Gemini CLI does not write. Every logged-in user was reported as logged out.
+test("oauth-personal reports loggedIn when oauth_creds.json exists", () => {
+  const result = runAuthProbe({ _AUTH_TYPE: "oauth-personal" }, { credentialFiles: ["oauth_creds.json"] });
+  assert.equal(result.loggedIn, true);
+  assert.equal(result.authMethod, "oauth-personal");
+  assert.match(result.credentialFile ?? "", /oauth_creds\.json$/);
+});
+
+test("oauth-personal still accepts the legacy gemini-credentials.json name", () => {
+  const result = runAuthProbe(
+    { _AUTH_TYPE: "oauth-personal" },
+    { credentialFiles: ["gemini-credentials.json"] }
+  );
+  assert.equal(result.loggedIn, true);
+  assert.match(result.credentialFile ?? "", /gemini-credentials\.json$/);
+});
+
+test("oauth-personal prefers oauth_creds.json when both names are present", () => {
+  const result = runAuthProbe(
+    { _AUTH_TYPE: "oauth-personal" },
+    { credentialFiles: ["gemini-credentials.json", "oauth_creds.json"] }
+  );
+  assert.match(result.credentialFile ?? "", /oauth_creds\.json$/);
+});
+
+test("oauth-personal reports NOT loggedIn and names the files it probed", () => {
+  const result = runAuthProbe({ _AUTH_TYPE: "oauth-personal" });
+  assert.equal(result.loggedIn, false);
+  assert.match(result.detail ?? "", /oauth_creds\.json/);
+  assert.match(result.detail ?? "", /gemini-credentials\.json/);
+  assert.equal(result.credentialFile, null);
 });
