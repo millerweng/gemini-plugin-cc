@@ -357,3 +357,37 @@ test("renderSetupReport says auto-detected when no base is pinned", async () => 
 
   assert.match(output, /review base: auto-detected/);
 });
+
+test("a repaired payload says so in the output", () => {
+  const parsed = { verdict: "approve", summary: "ok", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null, parseRepaired: "escaped raw control characters inside string values" },
+    { reviewLabel: "Review", targetLabel: "working tree diff" }
+  );
+
+  assert.match(output, /the JSON needed repair/);
+  assert.match(output, /control characters/);
+});
+
+// A failing run can carry hundreds of reasoning entries; the tail says how it ended.
+test("a long reasoning trace is trimmed to its tail", () => {
+  const reasoningSummary = Array.from({ length: 40 }, (_, index) => `step ${index + 1}`);
+  const output = renderReviewResult(
+    { parsed: null, rawOutput: "", parseError: "boom" },
+    { reviewLabel: "Review", targetLabel: "working tree diff", reasoningSummary }
+  );
+
+  assert.match(output, /28 earlier entries omitted/);
+  assert.match(output, /step 40/);
+  assert.doesNotMatch(output, /step 1\b/);
+});
+
+test("a short reasoning trace is shown whole with no omission notice", () => {
+  const output = renderReviewResult(
+    { parsed: null, rawOutput: "", parseError: "boom" },
+    { reviewLabel: "Review", targetLabel: "working tree diff", reasoningSummary: ["only step"] }
+  );
+
+  assert.match(output, /only step/);
+  assert.doesNotMatch(output, /earlier entries omitted/);
+});

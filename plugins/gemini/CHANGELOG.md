@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.2
+
+- Fixed a review payload being discarded when it contained a fenced code sample.
+  `extractJsonBlock` matched non-greedily to the first closing ```` ``` ````, and a
+  recommendation routinely embeds one, so the JSON was cut off mid-string and reported
+  as `Unterminated string in JSON at position N`. Extraction now closes on the last
+  fence and trusts the braces.
+- Raw newlines and tabs inside JSON string values are escaped and re-parsed instead of
+  throwing the payload away. Models emit them; JSON forbids them; the content means the
+  same either way. The output says when a payload needed that repair.
+- A reasoning trace longer than 12 entries is trimmed to its tail on failure paths,
+  with a count of what was dropped. One failing run carried 267 entries, which buried
+  the error they were printed to explain.
+
 ## 1.2.1
 
 - Fixed a configured review base hiding every uncommitted change. The default was

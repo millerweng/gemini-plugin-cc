@@ -891,6 +891,24 @@ export function parseStructuredOutput(rawOutput, fallback = {}) {
       rawOutput
     };
   } catch (error) {
+    // Before giving up, try the one repair that never changes meaning: escaping raw
+    // control characters inside string literals. Discarding a complete set of findings
+    // over a literal newline is a worse outcome than repairing it and saying so.
+    const repaired = escapeControlCharsInStrings(candidate);
+    if (repaired !== candidate) {
+      try {
+        return {
+          ...fallback,
+          parsed: JSON.parse(repaired),
+          parseError: null,
+          parseRepaired: "escaped raw control characters inside string values",
+          rawOutput
+        };
+      } catch {
+        // Fall through to the original error, which describes the payload as it came.
+      }
+    }
+
     return {
       ...fallback,
       parsed: null,
@@ -904,15 +922,68 @@ function extractJsonBlock(text) {
   const trimmed = String(text).trim();
   if (!trimmed) return null;
 
-  // Prefer ```json ... ``` fenced blocks if present.
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]+?)\s*```/i);
-  if (fenced) return fenced[1].trim();
+  // A review recommendation routinely contains a fenced code sample, so the payload
+  // has ``` inside it. A non-greedy match to the first closing fence cuts the JSON off
+  // mid-string; close on the last fence instead.
+  let body = trimmed;
+  const opening = trimmed.match(/^```(?:json)?[ \t]*\r?\n/i);
+  if (opening) {
+    const afterOpening = trimmed.slice(opening[0].length);
+    const lastFence = afterOpening.lastIndexOf("```");
+    body = lastFence === -1 ? afterOpening : afterOpening.slice(0, lastFence);
+  }
 
-  // Fallback: take from the first '{' to the matching final '}'.
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
+  // Braces are the real delimiters. Anything outside them is prose or fence residue.
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
-  return trimmed.slice(start, end + 1);
+  return body.slice(start, end + 1).trim();
+}
+
+/**
+ * Escapes raw control characters that appear inside JSON string literals. Models emit
+ * literal newlines and tabs inside strings, which JSON forbids, and the whole payload
+ * is otherwise discarded over a syntax detail that carries no meaning.
+ */
+function escapeControlCharsInStrings(json) {
+  let result = "";
+  let inString = false;
+  let escaping = false;
+
+  for (const character of json) {
+    if (escaping) {
+      result += character;
+      escaping = false;
+      continue;
+    }
+    if (character === "\\") {
+      result += character;
+      escaping = true;
+      continue;
+    }
+    if (character === '"') {
+      inString = !inString;
+      result += character;
+      continue;
+    }
+    if (inString) {
+      if (character === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (character === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (character === "\t") {
+        result += "\\t";
+        continue;
+      }
+    }
+    result += character;
+  }
+
+  return result;
 }
 
 export function readOutputSchema(schemaPath) {

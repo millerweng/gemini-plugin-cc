@@ -196,13 +196,24 @@ function pushJobDetails(lines, job, options = {}) {
   }
 }
 
+// A failing run can carry hundreds of reasoning entries. They are the only evidence of
+// what Gemini was doing, so they are kept — but the tail is what says how it ended, and
+// an unbounded dump buries the error above it.
+const MAX_REASONING_ENTRIES = 12;
+
 function appendReasoningSection(lines, reasoningSummary) {
   if (!Array.isArray(reasoningSummary) || reasoningSummary.length === 0) {
     return;
   }
 
+  const dropped = Math.max(0, reasoningSummary.length - MAX_REASONING_ENTRIES);
+  const shown = dropped > 0 ? reasoningSummary.slice(-MAX_REASONING_ENTRIES) : reasoningSummary;
+
   lines.push("", "Reasoning:");
-  for (const section of reasoningSummary) {
+  if (dropped > 0) {
+    lines.push(`- (${dropped} earlier entries omitted; last ${shown.length} shown)`);
+  }
+  for (const section of shown) {
     lines.push(`- ${section}`);
   }
 }
@@ -307,6 +318,10 @@ export function renderReviewResult(parsedResult, meta) {
       `Note: Gemini omitted ${data.inferred.map((field) => `\`${field}\``).join(", ")}; filled in from the rest of the response.`,
       ""
     );
+  }
+
+  if (parsedResult.parseRepaired) {
+    lines.push(`Note: the JSON needed repair before it would parse — ${parsedResult.parseRepaired}.`, "");
   }
 
   // An auto-detected base follows origin/HEAD, which points at the repo's default
