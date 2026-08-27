@@ -6,24 +6,52 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18.18-blue.svg)](package.json)
 [![Tests](https://img.shields.io/badge/tests-npm-green.svg)](tests/)
 
-> **Fork notice.** This is a fork of [m-ghalib/gemini-plugin-cc](https://github.com/m-ghalib/gemini-plugin-cc)
-> with three changes on top of upstream 1.0.0:
+> **Fork notice.** This is a fork of [m-ghalib/gemini-plugin-cc](https://github.com/m-ghalib/gemini-plugin-cc),
+> currently at 1.2.1 against upstream 1.0.0. Full detail in
+> [CHANGELOG](plugins/gemini/CHANGELOG.md); the short version:
 >
-> - **OAuth readiness is no longer misreported.** Upstream probes for
->   `~/.gemini/gemini-credentials.json`, a filename Gemini CLI does not write, so every
->   OAuth user was told they were logged out. `setup --verify` compounded it by refusing
->   to connect before the probe passed. The probe now looks for `oauth_creds.json`, and a
->   successful ACP handshake overrides whatever the probe found on disk.
-> - **`/gemini:transfer` is new.** It carries the current Claude Code session into a
->   resumable Gemini session.
-> - **Git arguments no longer pass through a shell on Windows**, matching
->   codex-plugin-cc #447.
+> **Reviews that looked fine but were not**
 >
-> It also carries two fixes for problems reported upstream but not yet released there:
-> `/gemini:review` no longer fails with `Missing array next_steps` (upstream PR #5 by
-> @petems), and the companion no longer resolves its state into the Codex plugin's
-> data directory and dials the wrong server (upstream issue #8, reported with a
-> verified fix by @mplezier).
+> - A review could return `approve` without ever seeing the diff. `maxInlineFiles` was
+>   2, so any change touching three files skipped the inline diff no matter how small —
+>   a 365-byte three-file diff qualified. Gemini was then told to fetch the diff itself
+>   with git, which an ACP session cannot do, and it inferred a verdict from diffstat
+>   line counts. The byte budget now decides, and when a diff genuinely does not fit,
+>   the prompt forbids `approve` without evidence.
+> - A response missing an optional field was thrown away and printed as raw JSON.
+>   Showing a model a schema does not make it follow one, so the renderer fills in what
+>   is missing and says which fields it filled. A missing severity reads `unrated`
+>   rather than defaulting to `low`.
+> - A configured review base hid every uncommitted change: a worktree with 15 modified
+>   files reviewed nothing and still reported a verdict.
+>
+> **Authentication**
+>
+> - OAuth users were told they were logged out. Upstream probes for
+>   `~/.gemini/gemini-credentials.json`, a filename Gemini CLI does not write, and
+>   `setup --verify` refused to connect until that probe passed. The probe now looks for
+>   `oauth_creds.json`, and a successful ACP handshake outranks whatever is on disk.
+>
+> **New**
+>
+> - `/gemini:transfer` carries the current Claude Code session into a resumable Gemini
+>   session.
+> - `/gemini:setup --set-review-base <ref>` pins the base a repository reviews against,
+>   inherited by its worktrees. Auto-detection follows `origin/HEAD`, which is wrong for
+>   repositories that merge into a long-lived integration branch.
+> - Progress lines stay out of captured output, and the reasoning trace is opt-in via
+>   `--show-reasoning`.
+> - Commands with no free-text arguments reject unrecognised flags instead of silently
+>   ignoring them.
+>
+> **Carried from upstream, not yet released there**
+>
+> - `/gemini:review` no longer fails with `Missing array next_steps` (PR #5 by
+>   [@petems](https://github.com/petems), fixes upstream #4).
+> - The companion no longer resolves its state into the Codex plugin's data directory
+>   and dials the wrong server (upstream #8, reported with a verified fix by
+>   [@mplezier](https://github.com/mplezier)).
+> - Git arguments no longer pass through a shell on Windows (codex-plugin-cc #447).
 >
 > All credit for the plugin itself goes upstream. Apache-2.0, same as the original.
 
@@ -37,6 +65,21 @@
 ```
 
 The `/gemini:setup` command checks whether the Gemini CLI is installed and authenticated. If the CLI is missing and npm is available, it offers to install the pinned CLI with `npm install -g @google/gemini-cli@0.38.2`.
+
+### Updating
+
+```bash
+claude plugin marketplace update gemini-plugin-cc
+claude plugin update gemini
+```
+
+Restart the session afterwards. Nothing updates on its own, and restarting alone does not
+pick up a new version.
+
+`claude plugin update` compares versions, so a release that did not roll its version
+number looks like no release at all. If an update reports nothing to do but you expect a
+change, check that the marketplace advertises a higher version than
+`~/.claude/plugins/installed_plugins.json` records.
 
 ## Prerequisites
 
@@ -62,7 +105,7 @@ read-only planning run.
 
 | Command | Purpose |
 |---|---|
-| `/gemini:setup` | Verify Gemini CLI readiness, check auth, and toggle the review gate |
+| `/gemini:setup` | Verify Gemini CLI readiness, check auth, toggle the review gate, pin the review base |
 | `/gemini:review` | Review code changes with structured findings |
 | `/gemini:adversarial-review` | Challenge implementation choices, tradeoffs, and assumptions |
 | `/gemini:rescue` | Delegate investigation, diagnosis, research, or fix work to Gemini |
@@ -111,14 +154,35 @@ read-only planning run.
 
 Reads your working-tree diff or branch diff and asks Gemini to review it. Returns structured findings covering correctness, regression risk, and code quality. **Review-only -- never modifies code.**
 
-**Flags:** `--base <ref>` (explicit base branch), `--scope auto|working-tree|branch`, `--wait` (foreground), `--background` (detach).
+**Flags:**
 
-If neither `--wait` nor `--background` is specified, Claude estimates the review size and recommends an execution mode.
+| Flag | Description |
+|---|---|
+| `--base <ref>` | Review the branch diff against this ref, even if the tree is dirty |
+| `--scope auto\|working-tree\|branch` | Force what gets reviewed; `auto` is the default |
+| `--cwd <path>` | Review a different checkout, such as a worktree the session is not in |
+| `--show-reasoning` | Include Gemini's reasoning trace in the output |
+| `--progress` | Stream progress lines even when output is being captured |
+| `--wait` / `--background` | Foreground, or detach |
+
+If neither `--wait` nor `--background` is given, Claude estimates the review size and recommends one.
+
+**What gets reviewed**, highest precedence first:
+
+1. `--scope working-tree` or `--scope branch`
+2. `--base <ref>` — a branch diff, regardless of uncommitted changes
+3. Uncommitted changes, when the tree is dirty
+4. A branch diff against the configured base (see `--set-review-base` below)
+5. A branch diff against the auto-detected default branch
+
+An auto-detected base spanning more than 40 files is flagged in the output, since that
+usually means the intended change is much smaller than the range being reviewed.
 
 ```bash
 /gemini:review
 /gemini:review --base main
 /gemini:review --scope branch --background
+/gemini:review --cwd ~/repo/.worktrees/feature-x
 ```
 
 ---
@@ -267,6 +331,13 @@ If the Gemini CLI is not installed and npm is available, offers to install it vi
 | `--verify` | Confirm credentials work end-to-end via ACP handshake (requires Gemini CLI) |
 | `--enable-review-gate` | Enable the stop-time review gate (Gemini reviews Claude's work before stopping) |
 | `--disable-review-gate` | Disable the stop-time review gate |
+| `--set-review-base <ref>` | Pin the base branch reviews compare against in this repository |
+| `--clear-review-base` | Drop the pinned base and go back to auto-detection |
+
+The report names the settings file it wrote to. Settings live under `CLAUDE_PLUGIN_DATA`,
+which Claude Code sets and a plain shell does not — running the companion script by hand
+writes to a temp fallback the plugin never reads back, so check that path if a setting
+appears not to take effect.
 
 The review gate is a `Stop` hook that blocks Claude from finishing until Gemini has reviewed the work. When the gate cannot reach Gemini (auth failure, network issue), it blocks and surfaces actionable guidance rather than silently allowing the stop. Disable with `--disable-review-gate` if the block is not resolvable in the current session.
 
@@ -278,8 +349,32 @@ The review gate is a `Stop` hook that blocks Claude from finishing until Gemini 
 /gemini:setup
 /gemini:setup --verify
 /gemini:setup --enable-review-gate
-/gemini:setup --disable-review-gate
+/gemini:setup --set-review-base origin/internal-release
+/gemini:setup --clear-review-base
 ```
+
+#### Pinning a review base
+
+Without a pinned base, reviews compare against whatever `origin/HEAD` points at, which
+is the repository's default branch. For a repository whose work merges into a long-lived
+integration branch, that merge-base sits far behind, and the review silently covers every
+change since:
+
+```bash
+/gemini:setup --set-review-base origin/internal-release
+```
+
+The ref is resolved when you set it, so a typo fails immediately rather than inside a
+later `merge-base` call.
+
+Each git worktree is its own workspace, since `git rev-parse --show-toplevel` returns the
+worktree's own path. A worktree with no base of its own inherits the main checkout's, so
+pinning it once covers the worktrees created from it. Setting one on a worktree still
+wins, and unrelated repositories inherit nothing.
+
+A pinned base only supplies the ref for a branch review. It does not turn a dirty tree
+into a branch diff — uncommitted changes still take precedence, and `--base` is how you
+ask for a branch diff regardless.
 
 ---
 
@@ -339,7 +434,14 @@ Yes. The plugin starts the Gemini CLI as a local process communicating via ACP (
 The Agent-Client Protocol is a JSON-RPC 2.0-based protocol used by the Gemini CLI for programmatic interaction. It supports session management, turn-based prompting, streaming updates, and session mode control.
 
 **Can I use this alongside the Codex plugin?**
-Yes. Both plugins use separate namespaces (`/gemini:*` and `/codex:*`) and independent runtimes. They do not interfere with each other.
+Yes. Separate namespaces (`/gemini:*` and `/codex:*`) and independent runtimes.
+
+Upstream 1.0.0 did interfere, which is upstream issue #8: `CLAUDE_PLUGIN_DATA` carries
+whichever plugin's directory the surrounding shell holds, and the Codex plugin uses an
+identical `state/<slug>-<hash>/broker.json` layout. Both plugins resolved to one state
+file, this client loaded Codex's broker session and dialled the Codex app-server, and
+every task died on `unknown variant 'session/new'`. This fork checks that the directory
+belongs to Gemini, and treats a wrong-dialect broker reply as a dead broker.
 
 **What happens if Gemini is not authenticated?**
 The plugin detects this and tells you to run `/gemini:setup`. You can also run `gemini` interactively in a terminal to complete the OAuth flow.
