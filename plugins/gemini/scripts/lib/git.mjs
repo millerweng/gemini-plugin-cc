@@ -164,6 +164,10 @@ export function resolveReviewTarget(cwd, options = {}) {
 
   const requestedScope = options.scope ?? "auto";
   const baseRef = options.base ?? null;
+  // A configured default only supplies the ref for a branch review. It must not act
+  // like an explicit --base, or a dirty tree would be reviewed as a branch diff and
+  // every uncommitted change would be invisible.
+  const defaultBase = options.defaultBase ?? null;
   const state = getWorkingTreeState(cwd);
   const supportedScopes = new Set(["auto", "working-tree", "branch"]);
 
@@ -191,11 +195,11 @@ export function resolveReviewTarget(cwd, options = {}) {
   }
 
   if (requestedScope === "branch") {
-    const detectedBase = detectDefaultBranch(cwd);
+    const branchBase = defaultBase ?? detectDefaultBranch(cwd);
     return {
       mode: "branch",
-      label: `branch diff against ${detectedBase}`,
-      baseRef: detectedBase,
+      label: `branch diff against ${branchBase}`,
+      baseRef: branchBase,
       explicit: true
     };
   }
@@ -208,12 +212,12 @@ export function resolveReviewTarget(cwd, options = {}) {
     };
   }
 
-  const detectedBase = detectDefaultBranch(cwd);
+  const branchBase = defaultBase ?? detectDefaultBranch(cwd);
   return {
     mode: "branch",
-    label: `branch diff against ${detectedBase}`,
-    baseRef: detectedBase,
-    explicit: false
+    label: `branch diff against ${branchBase}`,
+    baseRef: branchBase,
+    explicit: Boolean(defaultBase)
   };
 }
 

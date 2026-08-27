@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed a configured review base hiding every uncommitted change. The default was
+  passed as `options.base`, which is how `--base` says "review a branch diff", and
+  `resolveReviewTarget` returns on it before the dirty-tree check. So once a base was
+  configured, a dirty checkout was reviewed as a branch diff: a worktree with 15
+  modified files reported `fileCount: 0` and reviewed nothing. A configured default now
+  only supplies the ref when a branch review is actually chosen. An explicit `--base`
+  still forces a branch diff, and `--scope` still wins over both.
+
 ## 1.2.0
 
 - Fixed `oauth-personal` always reporting "not authenticated". The probe looked for

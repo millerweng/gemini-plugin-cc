@@ -225,3 +225,82 @@ test("a diff over the byte budget falls back to self-collect", () => {
   assert.match(context.collectionGuidance, /needs-attention/);
   assert.match(context.collectionGuidance, /Never infer a verdict from diffstat/);
 });
+
+// Regression: a configured default base was passed as options.base, which is the
+// "user asked for a branch diff" signal. resolveReviewTarget returns early on it, so a
+// dirty tree was reviewed as a branch diff and every uncommitted change was invisible.
+// A worktree with 15 modified files reported fileCount 0.
+test("a configured default base does not hide a dirty working tree", () => {
+  const cwd = makeTempDir("default-base-dirty-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  run("git", ["branch", "integration"], { cwd });
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 2;\n");
+
+  const target = resolveReviewTarget(cwd, { defaultBase: "integration" });
+
+  assert.equal(target.mode, "working-tree");
+  const context = collectReviewContext(cwd, target, {});
+  assert.equal(context.fileCount, 1);
+});
+
+test("an explicit base still forces a branch diff over a dirty tree", () => {
+  const cwd = makeTempDir("explicit-base-dirty-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  run("git", ["branch", "integration"], { cwd });
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 2;\n");
+
+  const target = resolveReviewTarget(cwd, { base: "integration" });
+
+  assert.equal(target.mode, "branch");
+  assert.equal(target.baseRef, "integration");
+});
+
+test("a configured default base supplies the ref once the tree is clean", () => {
+  const cwd = makeTempDir("default-base-clean-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  run("git", ["branch", "integration"], { cwd });
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 2;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "second"], { cwd });
+
+  const target = resolveReviewTarget(cwd, { defaultBase: "integration" });
+
+  assert.equal(target.mode, "branch");
+  assert.equal(target.baseRef, "integration");
+  // It came from configuration, so it is a deliberate choice, not a guess.
+  assert.equal(target.explicit, true);
+});
+
+test("--scope working-tree wins over a configured default base", () => {
+  const cwd = makeTempDir("scope-wt-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  run("git", ["branch", "integration"], { cwd });
+
+  const target = resolveReviewTarget(cwd, { defaultBase: "integration", scope: "working-tree" });
+  assert.equal(target.mode, "working-tree");
+});
+
+test("--scope branch uses the configured default instead of detecting one", () => {
+  const cwd = makeTempDir("scope-branch-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "app.js"), "export const value = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  run("git", ["branch", "integration"], { cwd });
+
+  const target = resolveReviewTarget(cwd, { defaultBase: "integration", scope: "branch" });
+  assert.equal(target.mode, "branch");
+  assert.equal(target.baseRef, "integration");
+});

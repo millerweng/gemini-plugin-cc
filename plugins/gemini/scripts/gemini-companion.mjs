@@ -784,10 +784,11 @@ async function handleReviewCommand(argv, config) {
   // explicit and is not second-guessed the way auto-detection is.
   const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
   const target = resolveReviewTarget(cwd, {
-    base: options.base ?? configuredBase,
+    base: options.base,
+    defaultBase: configuredBase,
     scope: options.scope
   });
-  target.baseSource = options.base ? "flag" : configuredBase ? "config" : "detected";
+  target.baseSource = options.base ? "flag" : target.baseRef && configuredBase ? "config" : "detected";
 
   const metadata = buildReviewJobMetadata(config.reviewName, target);
   const job = createCompanionJob({
