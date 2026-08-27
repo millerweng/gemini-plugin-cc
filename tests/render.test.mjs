@@ -315,3 +315,45 @@ test("a shape-rejected payload also keeps the trace", () => {
   assert.match(output, /nothing reviewable/);
   assert.match(output, /Analyzing token limits/);
 });
+
+// Settings land wherever CLAUDE_PLUGIN_DATA points, which Claude Code sets and a plain
+// shell does not. Naming the file is what makes a setting written to the wrong place
+// visible instead of looking like it worked.
+test("renderSetupReport names the settings file and the review base", async () => {
+  const { renderSetupReport } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderSetupReport({
+    ready: true,
+    node: { detail: "v24" },
+    npm: { detail: "11" },
+    gemini: { detail: "0.57.0" },
+    auth: { detail: "Google OAuth (personal)", verified: true },
+    sessionRuntime: { label: "direct startup" },
+    reviewGateEnabled: false,
+    reviewBase: "origin/internal-release",
+    configFile: "/home/u/.claude/plugins/data/gemini-x/state/repo-abc/state.json",
+    actionsTaken: [],
+    nextSteps: []
+  });
+
+  assert.match(output, /review base: origin\/internal-release/);
+  assert.match(output, /settings file: .*state\.json/);
+});
+
+test("renderSetupReport says auto-detected when no base is pinned", async () => {
+  const { renderSetupReport } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderSetupReport({
+    ready: true,
+    node: { detail: "v24" },
+    npm: { detail: "11" },
+    gemini: { detail: "0.57.0" },
+    auth: { detail: "ok", verified: true },
+    sessionRuntime: { label: "direct startup" },
+    reviewGateEnabled: false,
+    reviewBase: null,
+    configFile: "/tmp/x/state.json",
+    actionsTaken: [],
+    nextSteps: []
+  });
+
+  assert.match(output, /review base: auto-detected/);
+});

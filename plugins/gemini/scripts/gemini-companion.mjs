@@ -34,6 +34,7 @@ import {
   generateJobId,
   getConfig,
   listJobs,
+  resolveStateFile,
   setConfig,
   upsertJob,
   writeJobFile
@@ -211,6 +212,10 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     reviewBase: config.reviewBase ?? null,
+    // Where settings land depends on CLAUDE_PLUGIN_DATA, which Claude Code sets and a
+    // plain shell does not. Running this command by hand writes to the temp fallback
+    // instead, and the plugin then never reads it back — so name the file.
+    configFile: resolveStateFile(workspaceRoot),
     actionsTaken,
     nextSteps
   };
@@ -645,10 +650,24 @@ function requireTaskRequest(prompt, resumeLast) {
   }
 }
 
+// Progress lines exist so a human watching a long run can see it move. Claude Code
+// captures stdout and stderr of a background run into one file, where they bury the
+// report they were meant to accompany, so they are suppressed unless stderr is a
+// terminal. The job log keeps every line either way, and `--progress` forces them on.
+function shouldStreamProgress(options = {}) {
+  if (options.json) {
+    return false;
+  }
+  if (options.forceProgress) {
+    return true;
+  }
+  return Boolean(process.stderr.isTTY);
+}
+
 async function runForegroundCommand(job, runner, options = {}) {
   const { logFile, progress } = createTrackedProgress(job, {
     logFile: options.logFile,
-    stderr: !options.json
+    stderr: shouldStreamProgress(options)
   });
   let execution;
   try {
@@ -726,7 +745,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
-    booleanOptions: ["json", "background", "wait", "show-reasoning"],
+    booleanOptions: ["json", "background", "wait", "show-reasoning", "progress"],
     aliasMap: { m: "model" }
   });
 
@@ -765,7 +784,7 @@ async function handleReviewCommand(argv, config) {
         showReasoning: Boolean(options["show-reasoning"]),
         onProgress: progress
       }),
-    { json: options.json }
+    { json: options.json, forceProgress: Boolean(options.progress) }
   );
 }
 
@@ -783,7 +802,8 @@ async function handleTask(argv) {
       "resume-last",
       "resume",
       "fresh",
-      "background"
+      "background",
+      "progress"
     ],
     aliasMap: { m: "model" }
   });
@@ -843,7 +863,7 @@ async function handleTask(argv) {
         jobId: job.id,
         onProgress: progress
       }),
-    { json: options.json }
+    { json: options.json, forceProgress: Boolean(options.progress) }
   );
 }
 

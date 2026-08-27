@@ -78,6 +78,16 @@
   resolved base and where it came from are now passed through, which also makes the
   wide-range warning fire on the right runs instead of never.
 
+- Progress lines are suppressed when stderr is not a terminal. They exist for a human
+  watching a long run, but Claude Code captures stdout and stderr of a background run
+  into one file, where dozens of `[gemini] Reasoning: …` lines bury the report they
+  were meant to accompany. The job log still records every line, and `--progress`
+  forces them back on.
+- `setup` now prints the review base and the settings file it wrote to. Settings land
+  under `CLAUDE_PLUGIN_DATA`, which Claude Code sets and a plain shell does not, so
+  running the command by hand writes to the temp fallback and the plugin never reads
+  it back — with the path shown, that is visible instead of looking like it worked.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.
