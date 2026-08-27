@@ -27,7 +27,12 @@ import {
   writeGeminiSession
 } from "./lib/claude-session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
-import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
+import {
+  collectReviewContext,
+  ensureGitRepository,
+  getMainWorktreeRoot,
+  resolveReviewTarget
+} from "./lib/git.mjs";
 import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
@@ -162,6 +167,27 @@ function resolveCommandWorkspace(options = {}) {
   return resolveWorkspaceRoot(resolveCommandCwd(options));
 }
 
+/**
+ * A linked worktree is its own workspace, so settings do not carry over from the
+ * checkout it was created from. Setting the same base in every short-lived worktree is
+ * busywork, so an unset worktree falls back to the main worktree's value. Setting it
+ * on the worktree still wins.
+ */
+function resolveConfiguredReviewBase(cwd, workspaceRoot) {
+  const own = getConfig(workspaceRoot).reviewBase || null;
+  if (own) {
+    return { base: own, inheritedFrom: null };
+  }
+
+  const mainRoot = getMainWorktreeRoot(cwd);
+  if (!mainRoot || mainRoot === workspaceRoot) {
+    return { base: null, inheritedFrom: null };
+  }
+
+  const inherited = getConfig(mainRoot).reviewBase || null;
+  return inherited ? { base: inherited, inheritedFrom: mainRoot } : { base: null, inheritedFrom: null };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -188,6 +214,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const geminiStatus = getGeminiAvailability(cwd);
   const authStatus = await getGeminiAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
+  const reviewBase = resolveConfiguredReviewBase(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -211,7 +238,8 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     auth: authStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
-    reviewBase: config.reviewBase ?? null,
+    reviewBase: reviewBase.base,
+    reviewBaseInheritedFrom: reviewBase.inheritedFrom,
     // Where settings land depends on CLAUDE_PLUGIN_DATA, which Claude Code sets and a
     // plain shell does not. Running this command by hand writes to the temp fallback
     // instead, and the plugin then never reads it back — so name the file.
@@ -754,7 +782,7 @@ async function handleReviewCommand(argv, config) {
   const focusText = positionals.join(" ").trim();
   // A configured base is a deliberate choice for this workspace, so it counts as
   // explicit and is not second-guessed the way auto-detection is.
-  const configuredBase = getConfig(workspaceRoot).reviewBase || null;
+  const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
   const target = resolveReviewTarget(cwd, {
     base: options.base ?? configuredBase,
     scope: options.scope

@@ -220,7 +220,7 @@ export function renderSetupReport(report) {
     `- auth: ${report.auth.detail}${report.auth.verified === true ? " (verified)" : report.auth.verified === false ? " (verification failed)" : " (unverified)"}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
-    `- review base: ${report.reviewBase ?? "auto-detected"}`,
+    `- review base: ${report.reviewBase ?? "auto-detected"}${report.reviewBaseInheritedFrom ? ` (inherited from ${report.reviewBaseInheritedFrom})` : ""}`,
     ...(report.configFile ? [`- settings file: ${report.configFile}`] : []),
     ""
   ];

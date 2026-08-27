@@ -88,6 +88,13 @@
   running the command by hand writes to the temp fallback and the plugin never reads
   it back — with the path shown, that is visible instead of looking like it worked.
 
+- Linked git worktrees inherit the main checkout's review base. Every worktree is its
+  own workspace — `git rev-parse --show-toplevel` returns the worktree's own path — so
+  a base set on the checkout did not apply to worktrees created from it, and each
+  short-lived worktree had to be configured again. An unset worktree now falls back to
+  the main worktree's value; setting one on the worktree still wins, and unrelated
+  repositories inherit nothing. `setup` names the checkout a base was inherited from.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.

@@ -96,6 +96,28 @@ export function getRepoRoot(cwd) {
   return gitChecked(cwd, ["rev-parse", "--show-toplevel"]).stdout.trim();
 }
 
+/**
+ * Working directory of the main worktree, which linked worktrees can inherit settings
+ * from. `--git-common-dir` is the shared .git directory: a bare ".git" in the main
+ * checkout, an absolute path to it from a linked worktree. Returns null when the repo
+ * has no working tree to speak of (bare, or not a repo at all).
+ */
+export function getMainWorktreeRoot(cwd) {
+  const result = git(cwd, ["rev-parse", "--git-common-dir"]);
+  if (result.status !== 0) {
+    return null;
+  }
+  const commonDir = result.stdout.trim();
+  if (!commonDir) {
+    return null;
+  }
+  const absoluteCommonDir = path.resolve(cwd, commonDir);
+  if (path.basename(absoluteCommonDir) !== ".git") {
+    return null;
+  }
+  return path.dirname(absoluteCommonDir);
+}
+
 export function detectDefaultBranch(cwd) {
   const symbolic = git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
   if (symbolic.status === 0) {
