@@ -335,10 +335,9 @@ export function renderReviewResult(parsedResult, meta) {
     );
   }
 
-  // The diff did not fit in the prompt, so Gemini had to fetch the changes itself. An
-  // ACP session may not be able to, and a verdict reached without the diff is worth
-  // nothing — say so rather than letting it read as a reviewed result.
-  if (meta.inputMode === "self-collect") {
+  // The diff was truncated to fit. The findings are still grounded in real diff text,
+  // but they cannot cover the files that were left out.
+  if (meta.inputMode === "truncated-diff") {
     const scale = [
       Number.isFinite(meta.fileCount) ? `${meta.fileCount} files` : null,
       Number.isFinite(meta.diffBytes) ? `${Math.ceil(meta.diffBytes / 1024)} KB of diff` : null
@@ -346,7 +345,7 @@ export function renderReviewResult(parsedResult, meta) {
       .filter(Boolean)
       .join(", ");
     lines.push(
-      `Warning: the diff was too large to inline${scale ? ` (${scale})` : ""}, so Gemini was asked to read the changes itself. Confirm the findings reference real code before acting on this verdict.`,
+      `Warning: the diff was too large to send in full${scale ? ` (${scale})` : ""}, so it was truncated. Files listed under "Files Not Included" in the prompt were not reviewed at all.`,
       ""
     );
   }

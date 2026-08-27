@@ -6,11 +6,11 @@ import { formatCommandFailure, runCommand, runCommandChecked } from "./process.m
 
 const MAX_UNTRACKED_BYTES = 24 * 1024;
 const MAX_AGGREGATE_UNTRACKED_BYTES = 128 * 1024;
-// The byte budget is what actually decides whether a diff fits in the prompt. The file
-// count is only a guard against a diff spread so thin that the per-file scaffolding
-// dominates; it used to be 2, which sent a 365-byte three-file diff down the
-// self-collect path where Gemini has no way to fetch the diff at all.
-const DEFAULT_INLINE_DIFF_MAX_FILES = 60;
+// The byte budget is the only thing that decides whether a diff fits in the prompt.
+// There used to be a file-count gate as well — first 2, then 60 — and both did the same
+// damage: a diff well inside the byte budget was declared too large because it touched
+// one file too many. A 62-file review failed that way. Per-file scaffolding is part of
+// the diff, so it is already counted in bytes.
 const DEFAULT_INLINE_DIFF_MAX_BYTES = 256 * 1024;
 
 // Git is directly executable on Windows. Repository-derived arguments must never pass through a shell.
@@ -26,12 +26,77 @@ function listUniqueFiles(...groups) {
   return [...new Set(groups.flat().filter(Boolean))].sort();
 }
 
-function normalizeMaxInlineFiles(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_INLINE_DIFF_MAX_FILES;
+/**
+ * Collects per-file diffs until the byte budget runs out, and reports which files did
+ * not fit. A review runs in Gemini's plan mode, which has no shell, so "fetch the diff
+ * yourself" is not a path it can take — partial evidence plus an explicit list of what
+ * is missing beats no evidence at all.
+ */
+function collectTruncatedDiff(cwd, files, diffArgsFor, maxBytes) {
+  const included = [];
+  const omitted = [];
+  let used = 0;
+
+  for (const file of files) {
+    if (omitted.length > 0) {
+      // Once the budget is gone, stop spending git calls on files that cannot fit.
+      omitted.push(file);
+      continue;
+    }
+    const result = git(cwd, [...diffArgsFor(file), "--", file], { maxBuffer: maxBytes + 1 });
+    if (result.error) {
+      // Usually ENOBUFS: this one file's diff exceeds the whole budget. Treating that
+      // as "no diff" would drop it from the diff and from the omitted list both,
+      // leaving no trace that it was never reviewed.
+      omitted.push(file);
+      continue;
+    }
+    const body = result.stdout;
+    if (!body) {
+      // Genuinely nothing to show for this path — a mode-only change, for instance.
+      continue;
+    }
+    if (used + body.length > maxBytes) {
+      omitted.push(file);
+      continue;
+    }
+    included.push(body);
+    used += body.length;
   }
-  return Math.floor(parsed);
+
+  return { body: included.join(""), omitted, bytes: used };
+}
+
+// Listing every omitted path is itself a large block of prompt. Enough names to be
+// recognisable, then a count.
+const MAX_OMITTED_FILES_LISTED = 40;
+// A diffstat for hundreds of files is longer than some of the diffs it summarises.
+const MAX_DIFFSTAT_LINES = 60;
+
+function formatOmittedFiles(omitted) {
+  if (omitted.length === 0) {
+    return "";
+  }
+  const listed = omitted.slice(0, MAX_OMITTED_FILES_LISTED);
+  const lines = [
+    `${omitted.length} file(s) did not fit in the prompt and their diffs are NOT included below.`,
+    "Do not draw conclusions about them; say so if they matter to a finding:",
+    ...listed.map((file) => `- ${file}`)
+  ];
+  if (omitted.length > listed.length) {
+    lines.push(`- ... and ${omitted.length - listed.length} more`);
+  }
+  return lines.join("\n");
+}
+
+function truncateDiffStat(diffStat) {
+  const lines = diffStat.split("\n");
+  if (lines.length <= MAX_DIFFSTAT_LINES) {
+    return diffStat;
+  }
+  // The last line is git's own "N files changed" summary, worth keeping.
+  const head = lines.slice(0, MAX_DIFFSTAT_LINES - 2);
+  return [...head, `... ${lines.length - head.length - 1} more file(s) elided`, lines[lines.length - 1]].join("\n");
 }
 
 function normalizeMaxInlineDiffBytes(value) {
@@ -313,11 +378,19 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
     const stagedStat = gitChecked(cwd, ["diff", "--shortstat", "--cached"]).stdout.trim();
     const unstagedStat = gitChecked(cwd, ["diff", "--shortstat"]).stdout.trim();
     const untrackedBody = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    const tracked = listUniqueFiles(state.staged, state.unstaged);
+    const truncated = collectTruncatedDiff(
+      cwd,
+      tracked,
+      () => ["diff", "HEAD", "--binary", "--no-ext-diff", "--submodule=diff"],
+      options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
+    );
     parts = [
       formatSection("Git Status", status),
       formatSection("Staged Diff Stat", stagedStat),
       formatSection("Unstaged Diff Stat", unstagedStat),
-      formatSection("Changed Files", changedFiles.join("\n")),
+      formatSection("Diff (partial)", truncated.body),
+      formatSection("Files Not Included", formatOmittedFiles(truncated.omitted)),
       formatSection("Untracked Files", untrackedBody)
     ];
   }
@@ -350,11 +423,20 @@ function collectBranchContext(cwd, baseRef, options = {}) {
             gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange]).stdout
           )
         ].join("\n")
-      : [
-          formatSection("Commit Log", logOutput),
-          formatSection("Diff Stat", diffStat),
-          formatSection("Changed Files", changedFiles.join("\n"))
-        ].join("\n"),
+      : (() => {
+          const truncated = collectTruncatedDiff(
+            cwd,
+            changedFiles,
+            () => ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
+            options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
+          );
+          return [
+            formatSection("Commit Log", logOutput),
+            formatSection("Diff Stat", truncateDiffStat(diffStat)),
+            formatSection("Branch Diff (partial)", truncated.body),
+            formatSection("Files Not Included", formatOmittedFiles(truncated.omitted))
+          ].join("\n");
+        })(),
     changedFiles,
     comparison
   };
@@ -365,23 +447,23 @@ function buildAdversarialCollectionGuidance(options = {}) {
     return "Use the repository context below as primary evidence.";
   }
 
-  // An ACP session has no shell, so "go run git yourself" is an instruction Gemini
-  // often cannot follow. Telling it to try anyway and saying nothing about what to do
-  // on failure produced an `approve` verdict derived from diffstat line counts alone.
-  // The one thing that must never happen is a clean bill of health with no evidence.
+  // A review runs in Gemini's plan mode, which has no run_shell_command, so telling it
+  // to fetch the diff itself is an instruction it cannot follow — one 62-file review
+  // spent 55 seconds reading whole files and then exited with no output at all. The diff
+  // below is therefore truncated rather than withheld: real evidence for the files that
+  // fit, and an explicit list of the ones that did not.
   return [
-    "The repository context below is a summary only — the diff itself was too large to inline.",
-    "Read the changed files with whatever read-only tools you have before finalizing findings.",
-    "If you cannot retrieve the actual changes, do NOT return `approve`.",
-    "Say plainly in the summary which evidence you could not obtain, and return `needs-attention`.",
-    "Never infer a verdict from diffstat line counts or filenames alone."
+    "The diff below is truncated — it did not all fit in this prompt.",
+    "Everything shown is the real diff and is safe to reason about.",
+    "Files whose diffs were left out are listed under 'Files Not Included'; you have no evidence about those.",
+    "Do not infer anything about an omitted file, and do not treat the truncation itself as a finding.",
+    "If an omitted file is material to a finding, say which one and why in the summary."
   ].join(" ");
 }
 
 export function collectReviewContext(cwd, target, options = {}) {
   const repoRoot = getRepoRoot(cwd);
   const currentBranch = getCurrentBranch(repoRoot);
-  const maxInlineFiles = normalizeMaxInlineFiles(options.maxInlineFiles);
   const maxInlineDiffBytes = normalizeMaxInlineDiffBytes(options.maxInlineDiffBytes);
   let details;
   let includeDiff;
@@ -397,11 +479,12 @@ export function collectReviewContext(cwd, target, options = {}) {
       ],
       maxInlineDiffBytes
     );
-    includeDiff =
-      options.includeDiff ??
-      (listUniqueFiles(state.staged, state.unstaged, state.untracked).length <= maxInlineFiles &&
-        diffBytes <= maxInlineDiffBytes);
-    details = collectWorkingTreeContext(repoRoot, state, { includeDiff, maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    includeDiff = options.includeDiff ?? diffBytes <= maxInlineDiffBytes;
+    details = collectWorkingTreeContext(repoRoot, state, {
+      includeDiff,
+      maxInlineDiffBytes,
+      maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes
+    });
   } else {
     const comparison = buildBranchComparison(repoRoot, target.baseRef);
     const fileCount = gitChecked(repoRoot, ["diff", "--name-only", comparison.commitRange]).stdout.trim().split("\n").filter(Boolean).length;
@@ -410,8 +493,8 @@ export function collectReviewContext(cwd, target, options = {}) {
       ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
       maxInlineDiffBytes
     );
-    includeDiff = options.includeDiff ?? (fileCount <= maxInlineFiles && diffBytes <= maxInlineDiffBytes);
-    details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison });
+    includeDiff = options.includeDiff ?? diffBytes <= maxInlineDiffBytes;
+    details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison, maxInlineDiffBytes });
   }
 
   return {
@@ -421,7 +504,7 @@ export function collectReviewContext(cwd, target, options = {}) {
     target,
     fileCount: details.changedFiles.length,
     diffBytes,
-    inputMode: includeDiff ? "inline-diff" : "self-collect",
+    inputMode: includeDiff ? "inline-diff" : "truncated-diff",
     collectionGuidance: buildAdversarialCollectionGuidance({ includeDiff }),
     ...details
   };

@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.0
+
+- Reviews no longer ask Gemini to fetch the diff itself. A review runs in Gemini's plan
+  mode so it cannot edit code, which also means it has no `run_shell_command` — the
+  self-collect path was asking for something it could never do. One 62-file adversarial
+  review spent 55 seconds reading whole files and exited with no output at all. When the
+  diff does not fit, per-file diffs are now included until the byte budget runs out and
+  the rest are listed under "Files Not Included", so findings rest on real diff text and
+  the gaps are explicit.
+- Removed the file-count gate entirely. It was 2, then 60, and both did the same damage:
+  a diff well inside the byte budget was refused for touching one file too many. 62
+  files was enough to trigger it. Per-file scaffolding is part of the diff, so bytes
+  already account for it.
+- A file whose own diff exceeds the budget is now named as omitted instead of vanishing.
+  Git returns ENOBUFS for it, which was read as "no diff" and skipped, so the file
+  appeared in neither the diff nor the omitted list and nothing recorded that it had
+  never been reviewed.
+- The diffstat and the omitted-file list are capped too. They are prompt text like
+  everything else, and for a few hundred files they were larger than some of the diffs
+  they described.
+- `maxInlineDiffBytes` now reaches the collectors it is meant to bound; it was dropped
+  on the way and truncation always used the default.
+
 ## 1.2.2
 
 - Fixed a review payload being discarded when it contained a fenced code sample.

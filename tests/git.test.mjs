@@ -136,12 +136,16 @@ test("collectReviewContext falls back to lightweight context for larger adversar
   // like. Which sizes select it is covered by the threshold tests further down.
   const context = collectReviewContext(cwd, target, { includeDiff: false });
 
-  assert.equal(context.inputMode, "self-collect");
+  assert.equal(context.inputMode, "truncated-diff");
   assert.equal(context.fileCount, 3);
-  assert.match(context.collectionGuidance, /summary only/i);
-  assert.match(context.collectionGuidance, /read-only tools/i);
-  assert.doesNotMatch(context.content, /SELF_COLLECT_MARKER_[ABC]/);
-  assert.match(context.content, /## Changed Files/);
+  assert.match(context.collectionGuidance, /truncated/i);
+  assert.match(context.collectionGuidance, /Files Not Included/);
+  // These diffs are tiny, so nothing actually had to be dropped: truncation carries
+  // real diff text rather than asking Gemini to go and find it.
+  assert.match(context.content, /SELF_COLLECT_MARKER_A/);
+  assert.match(context.content, /SELF_COLLECT_MARKER_B/);
+  assert.match(context.content, /SELF_COLLECT_MARKER_C/);
+  assert.match(context.content, /## Files Not Included/);
 });
 
 test("collectReviewContext falls back to lightweight context for oversized single-file diffs", () => {
@@ -156,10 +160,13 @@ test("collectReviewContext falls back to lightweight context for oversized singl
   const context = collectReviewContext(cwd, target, { maxInlineDiffBytes: 128 });
 
   assert.equal(context.fileCount, 1);
-  assert.equal(context.inputMode, "self-collect");
+  assert.equal(context.inputMode, "truncated-diff");
   assert.ok(context.diffBytes > 128);
+  // The only file is larger than the budget, so it is named as omitted instead of
+  // being partially pasted in.
   assert.doesNotMatch(context.content, /xxx/);
-  assert.match(context.content, /## Changed Files/);
+  assert.match(context.content, /1 file\(s\) did not fit/);
+  assert.match(context.content, /- app\.js/);
 });
 
 test("collectReviewContext keeps untracked file content in lightweight working tree context", () => {
@@ -177,9 +184,11 @@ test("collectReviewContext keeps untracked file content in lightweight working t
   const target = resolveReviewTarget(cwd, {});
   const context = collectReviewContext(cwd, target, { includeDiff: false });
 
-  assert.equal(context.inputMode, "self-collect");
+  assert.equal(context.inputMode, "truncated-diff");
   assert.equal(context.fileCount, 3);
-  assert.doesNotMatch(context.content, /TRACKED_MARKER_[AB]/);
+  // Tracked diffs fit here, so they are included; the point of this test is that
+  // untracked content is not lost when the diff is truncated.
+  assert.match(context.content, /TRACKED_MARKER_A/);
   assert.match(context.content, /## Untracked Files/);
   assert.match(context.content, /UNTRACKED_RISK_MARKER/);
 });
@@ -219,11 +228,11 @@ test("a diff over the byte budget falls back to self-collect", () => {
   const target = resolveReviewTarget(cwd, {});
   const context = collectReviewContext(cwd, target, {});
 
-  assert.equal(context.inputMode, "self-collect");
-  // Without the diff, a clean verdict is worthless — the prompt must forbid it.
-  assert.match(context.collectionGuidance, /do NOT return `approve`/);
-  assert.match(context.collectionGuidance, /needs-attention/);
-  assert.match(context.collectionGuidance, /Never infer a verdict from diffstat/);
+  assert.equal(context.inputMode, "truncated-diff");
+  // Plan mode has no shell, so the prompt must not ask Gemini to fetch anything.
+  assert.doesNotMatch(context.collectionGuidance, /yourself/i);
+  assert.match(context.collectionGuidance, /truncated/i);
+  assert.match(context.collectionGuidance, /Do not infer anything about an omitted file/);
 });
 
 // Regression: a configured default base was passed as options.base, which is the
@@ -303,4 +312,51 @@ test("--scope branch uses the configured default instead of detecting one", () =
   const target = resolveReviewTarget(cwd, { defaultBase: "integration", scope: "branch" });
   assert.equal(target.mode, "branch");
   assert.equal(target.baseRef, "integration");
+});
+
+// Regression: a file whose own diff exceeded the budget came back as an ENOBUFS error,
+// which was read as "no diff" and skipped. It appeared neither in the diff nor in the
+// omitted list, so nothing recorded that it had never been reviewed.
+test("a file too large for the budget is named, not silently dropped", () => {
+  const cwd = makeTempDir("oversize-single-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "small.js"), "export const a = 1;\n");
+  fs.writeFileSync(path.join(cwd, "huge.js"), "export const b = 1;\n");
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  fs.writeFileSync(path.join(cwd, "small.js"), "export const a = 2;\n");
+  fs.writeFileSync(path.join(cwd, "huge.js"), `export const b = '${"y".repeat(4096)}';\n`);
+
+  const target = resolveReviewTarget(cwd, {});
+  const context = collectReviewContext(cwd, target, { maxInlineDiffBytes: 512 });
+
+  assert.equal(context.inputMode, "truncated-diff");
+  assert.match(context.content, /did not fit/);
+  assert.match(context.content, /- huge\.js/);
+  // The oversized file's content must not leak in partially.
+  assert.doesNotMatch(context.content, /yyyy/);
+});
+
+test("every changed file appears either in the diff or in the omitted list", () => {
+  const cwd = makeTempDir("accounting-");
+  initGitRepo(cwd);
+  const names = ["a.js", "b.js", "c.js", "d.js"];
+  for (const name of names) {
+    fs.writeFileSync(path.join(cwd, name), `export const v = "${name}-1";\n`);
+  }
+  run("git", ["add", "-A"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  for (const name of names) {
+    fs.writeFileSync(path.join(cwd, name), `export const v = "${name}-${"z".repeat(200)}";\n`);
+  }
+
+  const target = resolveReviewTarget(cwd, {});
+  const context = collectReviewContext(cwd, target, { maxInlineDiffBytes: 700 });
+
+  assert.equal(context.inputMode, "truncated-diff");
+  for (const name of names) {
+    const inDiff = context.content.includes(`+++ b/${name}`);
+    const inOmitted = new RegExp(`- ${name.replace(".", "\\.")}$`, "m").test(context.content);
+    assert.ok(inDiff || inOmitted, `${name} is accounted for in neither the diff nor the omitted list`);
+  }
 });

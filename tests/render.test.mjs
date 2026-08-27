@@ -157,23 +157,23 @@ test("renderReviewResult still degrades when the payload has no review content",
   assert.match(output, /Raw final message:/);
 });
 
-test("renderReviewResult warns when Gemini had to fetch the diff itself", () => {
+test("renderReviewResult warns when the diff had to be truncated", () => {
   const parsed = { verdict: "approve", summary: "Routine bump.", findings: [] };
   const output = renderReviewResult(
     { parsed, rawOutput: "{}", parseError: null },
     {
       reviewLabel: "Review",
       targetLabel: "working tree diff",
-      inputMode: "self-collect",
+      inputMode: "truncated-diff",
       fileCount: 3,
       diffBytes: 300 * 1024
     }
   );
 
-  assert.match(output, /too large to inline/);
+  assert.match(output, /too large to send in full/);
   assert.match(output, /3 files/);
   assert.match(output, /300 KB of diff/);
-  assert.match(output, /Confirm the findings reference real code/);
+  assert.match(output, /were not reviewed at all/);
 });
 
 test("renderReviewResult stays quiet about input mode when the diff was inlined", () => {
@@ -183,7 +183,7 @@ test("renderReviewResult stays quiet about input mode when the diff was inlined"
     { reviewLabel: "Review", targetLabel: "working tree diff", inputMode: "inline-diff" }
   );
 
-  assert.doesNotMatch(output, /too large to inline/);
+  assert.doesNotMatch(output, /too large to send in full/);
 });
 
 // Regression: parseError was built from `error?.message ?? stderr`, and `??` lets an
