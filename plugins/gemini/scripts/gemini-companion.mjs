@@ -225,7 +225,9 @@ async function handleSetup(argv) {
       "enable-review-gate",
       "disable-review-gate",
       "clear-review-base"
-    ]
+    ],
+    // No free-text arguments here, so an unrecognised flag is a mistake, not content.
+    rejectUnknownOptions: true
   });
 
   if (options["enable-review-gate"] && options["disable-review-gate"]) {
@@ -855,7 +857,8 @@ function renderTransferResult(payload) {
 async function handleTransfer(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd", "source"],
-    booleanOptions: ["json", "include-tool-output"]
+    booleanOptions: ["json", "include-tool-output"],
+    rejectUnknownOptions: true
   });
 
   const cwd = resolveCommandCwd(options);

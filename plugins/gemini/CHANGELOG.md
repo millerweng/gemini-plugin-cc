@@ -61,6 +61,13 @@
   accepted it, but nothing advertised it, so there was no visible way to review a
   worktree other than the one the session runs in.
 
+- Commands that take no free-text arguments now reject unrecognised flags instead of
+  quietly filing them as positionals. `setup --set-review-base <ref>` on a build
+  without that flag printed a normal success report and did nothing, which is
+  indistinguishable from it having worked. `setup` and `transfer` are strict; `review`,
+  `task` and the job commands keep collecting unknown tokens, since free text is part
+  of their contract. The error names every flag the command does accept.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.

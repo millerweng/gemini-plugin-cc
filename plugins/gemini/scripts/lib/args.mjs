@@ -6,6 +6,18 @@ export function parseArgs(argv, config = {}) {
   const positionals = [];
   let passthrough = false;
 
+  // Commands taking free text (a review focus, a task prompt) legitimately collect
+  // unknown tokens as positionals. Commands that take none must not: swallowing a flag
+  // makes a no-op look like it worked, which is how `setup --set-review-base <ref>`
+  // reported success on a build that had no such flag.
+  const rejectUnknownOptions = config.rejectUnknownOptions === true;
+  const unknownOption = (token) => {
+    const known = [...booleanOptions, ...valueOptions].sort();
+    return new Error(
+      `Unknown option ${token}. This command accepts: ${known.map((name) => `--${name}`).join(", ")}.`
+    );
+  };
+
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
@@ -45,6 +57,9 @@ export function parseArgs(argv, config = {}) {
         continue;
       }
 
+      if (rejectUnknownOptions) {
+        throw unknownOption(`--${rawKey}`);
+      }
       positionals.push(token);
       continue;
     }
@@ -67,6 +82,9 @@ export function parseArgs(argv, config = {}) {
       continue;
     }
 
+    if (rejectUnknownOptions) {
+      throw unknownOption(token);
+    }
     positionals.push(token);
   }
 
