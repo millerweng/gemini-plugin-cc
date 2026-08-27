@@ -357,7 +357,13 @@ export function renderReviewResult(parsedResult, meta) {
     }
   }
 
-  appendReasoningSection(lines, meta.reasoningSummary);
+  // On a review that parsed, the reasoning trace restates the findings at length and
+  // costs tokens in whatever reads this. It stays available behind --show-reasoning,
+  // and the failure paths above still print it unconditionally — there it is the only
+  // evidence of what Gemini was doing.
+  if (meta.showReasoning) {
+    appendReasoningSection(lines, meta.reasoningSummary);
+  }
 
   return `${lines.join("\n").trimEnd()}\n`;
 }

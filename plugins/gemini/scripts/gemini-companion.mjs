@@ -92,8 +92,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--show-reasoning] [focus text]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--show-reasoning] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
@@ -403,6 +403,9 @@ async function executeReviewRun(request) {
     base: request.base,
     scope: request.scope
   });
+  // Where the base came from decides whether a wide range is worth warning about. The
+  // caller knows; re-resolving here would lose it and every base would look detected.
+  target.baseSource = request.baseSource ?? (request.base ? "flag" : "detected");
   const focusText = request.focusText?.trim() ?? "";
   const reviewName = request.reviewName ?? "Review";
 
@@ -448,6 +451,7 @@ async function executeReviewRun(request) {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
       reasoningSummary: result.reasoningSummary,
+      showReasoning: Boolean(request.showReasoning),
       inputMode: context.inputMode,
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
@@ -722,7 +726,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
-    booleanOptions: ["json", "background", "wait"],
+    booleanOptions: ["json", "background", "wait", "show-reasoning"],
     aliasMap: { m: "model" }
   });
 
@@ -752,11 +756,13 @@ async function handleReviewCommand(argv, config) {
     (progress) =>
       executeReviewRun({
         cwd,
-        base: options.base,
+        base: target.baseRef ?? null,
+        baseSource: target.baseSource,
         scope: options.scope,
         model: normalizeRequestedModel(options.model),
         focusText,
         reviewName: config.reviewName,
+        showReasoning: Boolean(options["show-reasoning"]),
         onProgress: progress
       }),
     { json: options.json }

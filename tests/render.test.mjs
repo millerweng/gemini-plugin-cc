@@ -251,3 +251,67 @@ test("a small auto-detected range does not warn", () => {
 
   assert.doesNotMatch(output, /auto-detected/);
 });
+
+// The reasoning trace restates the findings at length. On a review that parsed it is
+// dead weight in whatever reads the output, so it is opt-in.
+test("a successful review hides the reasoning trace by default", () => {
+  const parsed = { verdict: "approve", summary: "Fine.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      reasoningSummary: ["Reviewing unstaged changes", "Checking the skill docs"]
+    }
+  );
+
+  assert.doesNotMatch(output, /Reasoning:/);
+  assert.doesNotMatch(output, /Reviewing unstaged changes/);
+  assert.match(output, /Verdict: approve/);
+});
+
+test("--show-reasoning brings the trace back", () => {
+  const parsed = { verdict: "approve", summary: "Fine.", findings: [] };
+  const output = renderReviewResult(
+    { parsed, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      reasoningSummary: ["Reviewing unstaged changes"],
+      showReasoning: true
+    }
+  );
+
+  assert.match(output, /Reasoning:/);
+  assert.match(output, /Reviewing unstaged changes/);
+});
+
+// When nothing parsed, the trace is the only evidence of what Gemini did, so it is
+// printed whether or not it was asked for.
+test("a failed review keeps the reasoning trace without being asked", () => {
+  const output = renderReviewResult(
+    { parsed: null, rawOutput: "", parseError: "" },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      reasoningSummary: ["Analyzing token limits"]
+    }
+  );
+
+  assert.match(output, /Reasoning:/);
+  assert.match(output, /Analyzing token limits/);
+});
+
+test("a shape-rejected payload also keeps the trace", () => {
+  const output = renderReviewResult(
+    { parsed: { note: "nope" }, rawOutput: '{"note":"nope"}', parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      reasoningSummary: ["Analyzing token limits"]
+    }
+  );
+
+  assert.match(output, /nothing reviewable/);
+  assert.match(output, /Analyzing token limits/);
+});

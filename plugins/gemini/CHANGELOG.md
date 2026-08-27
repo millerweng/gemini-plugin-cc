@@ -68,6 +68,16 @@
   `task` and the job commands keep collecting unknown tokens, since free text is part
   of their contract. The error names every flag the command does accept.
 
+- Reviews no longer print the reasoning trace when the result parsed. It restates the
+  findings at length and costs tokens in whatever reads the output. `--show-reasoning`
+  brings it back. Failure paths still print it unconditionally, since there it is the
+  only evidence of what Gemini was doing.
+- Fixed the configured review base never reaching the review. `executeReviewRun`
+  re-resolved the target from the raw `--base` flag, so a base from config only
+  affected the job title while the run itself fell back to auto-detection. The
+  resolved base and where it came from are now passed through, which also makes the
+  wide-range warning fire on the right runs instead of never.
+
 ## 1.0.0
 
 - First public release as a standalone open-source repository.
