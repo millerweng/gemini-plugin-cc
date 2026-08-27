@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0
+## 1.2.0
 
 - Fixed `oauth-personal` always reporting "not authenticated". The probe looked for
   `~/.gemini/gemini-credentials.json`, a name Gemini CLI does not write; it now finds
