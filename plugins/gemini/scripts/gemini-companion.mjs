@@ -35,6 +35,7 @@ import {
 } from "./lib/git.mjs";
 import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
+import { buildLensDirective, getLens, mergeLensReviews, resolveLensIds } from "./lib/review-lenses.mjs";
 import {
   generateJobId,
   getConfig,
@@ -98,8 +99,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--show-reasoning] [focus text]",
-      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--show-reasoning] [focus text]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [focus text]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
@@ -332,7 +333,7 @@ async function handleSetup(argv) {
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
-function buildReviewPrompt(context, focusText, reviewName) {
+function buildReviewPrompt(context, focusText, reviewName, lens = null) {
   const templateName =
     reviewName === "Adversarial Review" ? "adversarial-review" : "review";
   const template = loadPromptTemplate(ROOT_DIR, templateName);
@@ -342,6 +343,9 @@ function buildReviewPrompt(context, focusText, reviewName) {
     USER_FOCUS: focusText || "No extra focus provided.",
     REVIEW_COLLECTION_GUIDANCE: context.collectionGuidance,
     REVIEW_INPUT: context.content,
+    // Empty for a single-pass review, which keeps that prompt byte-identical to the
+    // one this plugin has always sent.
+    LENS_DIRECTIVE: buildLensDirective(lens),
     OUTPUT_SCHEMA: JSON.stringify(readOutputSchema(REVIEW_SCHEMA), null, 2)
   });
 }
@@ -428,6 +432,23 @@ async function resolveLatestTrackedTaskSession(cwd, options = {}) {
   return findLatestTaskSession(workspaceRoot);
 }
 
+// One Gemini pass over an already-collected context. Split out so a multi-lens review
+// can reuse the same diff instead of re-running git for every pass.
+async function runReviewPass(context, request, reviewName, focusText, lens) {
+  const prompt = buildReviewPrompt(context, focusText, reviewName, lens);
+  const result = await runAcpReview(context.repoRoot, {
+    prompt,
+    model: request.model,
+    outputSchema: readOutputSchema(REVIEW_SCHEMA),
+    onProgress: request.onProgress
+  });
+  const parsed = parseStructuredOutput(result.finalMessage, {
+    status: result.status,
+    failureMessage: result.error?.message ?? result.stderr
+  });
+  return { result, parsed };
+}
+
 async function executeReviewRun(request) {
   ensureGeminiAvailable(request.cwd);
   ensureGitRepository(request.cwd);
@@ -443,19 +464,16 @@ async function executeReviewRun(request) {
   const reviewName = request.reviewName ?? "Review";
 
   const context = collectReviewContext(request.cwd, target);
-  const prompt = buildReviewPrompt(context, focusText, reviewName);
-  const result = await runAcpReview(context.repoRoot, {
-    prompt,
-    model: request.model,
-    outputSchema: readOutputSchema(REVIEW_SCHEMA),
-    onProgress: request.onProgress
-  });
-  const parsed = parseStructuredOutput(result.finalMessage, {
-    status: result.status,
-    failureMessage: result.error?.message ?? result.stderr
-  });
+
+  const lensIds = Array.isArray(request.lensIds) && request.lensIds.length > 0 ? request.lensIds : null;
+  if (lensIds) {
+    return executeMultiLensReviewRun({ context, request, target, reviewName, focusText, lensIds });
+  }
+
+  const { result, parsed } = await runReviewPass(context, request, reviewName, focusText, null);
   const payload = {
     review: reviewName,
+    lenses: null,
     target,
     threadId: result.threadId,
     context: {
@@ -496,6 +514,151 @@ async function executeReviewRun(request) {
       parsed.parsed?.summary ??
       parsed.parseError ??
       firstMeaningfulLine(result.finalMessage, `${reviewName} finished.`),
+    jobTitle: `Gemini ${reviewName}`,
+    jobClass: "review",
+    targetLabel: context.target.label
+  };
+}
+
+// Multi-lens review runs the passes one after another on purpose.
+// The ACP broker serves one session at a time, so parallel passes fall back to a
+// direct transport and start a separate Gemini process each — three at once is the
+// fastest way to hit a rate limit on a free-tier key. Serial passes keep reusing the
+// same broker session, and `--background` already covers not wanting to wait.
+async function executeMultiLensReviewRun({ context, request, target, reviewName, focusText, lensIds }) {
+  const runs = [];
+  for (const lensId of lensIds) {
+    const lens = getLens(lensId);
+    try {
+      const { result, parsed } = await runReviewPass(context, request, reviewName, focusText, lens);
+      runs.push({
+        lens: lensId,
+        label: lens?.label ?? lensId,
+        status: result.status,
+        threadId: result.threadId,
+        parsed: parsed.parsed,
+        parseError: parsed.parseError,
+        rawOutput: parsed.rawOutput,
+        reasoningSummary: result.reasoningSummary,
+        stderr: result.stderr
+      });
+    } catch (error) {
+      // A rate limit or a dropped connection on the third pass must not throw away the
+      // two that already finished and already cost their tokens. Record the failure as
+      // a failed lens and keep going; the merge step reports partial results.
+      runs.push({
+        lens: lensId,
+        label: lens?.label ?? lensId,
+        status: 1,
+        threadId: null,
+        parsed: null,
+        parseError: error instanceof Error ? error.message : String(error),
+        rawOutput: null,
+        reasoningSummary: null,
+        stderr: null
+      });
+    }
+  }
+
+  const { merged, lensRuns, failedLenses } = mergeLensReviews(runs);
+  const allFailed = merged === null;
+
+  // A partial result is still worth returning: losing two working passes because the
+  // third returned malformed JSON would waste the tokens they already cost.
+  const parsedResult = {
+    parsed: merged,
+    rawOutput: allFailed ? runs.map((run) => run.rawOutput).filter(Boolean).join("\n\n---\n\n") : null,
+    parseError: allFailed
+      ? `Every lens failed to return parseable JSON (${runs
+          .map((run) => `${run.label}: ${run.parseError ?? "no output"}`)
+          .join("; ")})`
+      : null
+  };
+
+  const combinedReasoning = runs
+    .map((run) => (run.reasoningSummary ? `## ${run.label}\n${run.reasoningSummary}` : null))
+    .filter(Boolean)
+    .join("\n\n");
+
+  // The first pass is not necessarily the one that produced a thread. When it fails on a
+  // rate limit its threadId is null, and pinning the payload to index 0 would report no
+  // thread at all even though later passes ran fine and are resumable.
+  const firstThreadId = runs.find((run) => run.threadId)?.threadId ?? null;
+
+  // Built once so the renderer sees the same per-pass detail the JSON payload carries.
+  // Keeping two shapes is how rawOutput ended up in --json but not on the terminal.
+  const detailedLensRuns = lensRuns.map((run, index) => ({
+    ...run,
+    threadId: runs[index]?.threadId ?? null,
+    // Kept for every pass, not just a total failure. A lens that returned unparseable
+    // JSON is exactly the one whose raw text is needed to tell a token limit from a
+    // refusal from markdown bleed.
+    rawOutput: runs[index]?.rawOutput ?? null
+  }));
+
+  const payload = {
+    review: reviewName,
+    lenses: lensIds,
+    target,
+    threadId: firstThreadId,
+    context: {
+      repoRoot: context.repoRoot,
+      branch: context.branch,
+      summary: context.summary
+    },
+    gemini: {
+      // `??`, not `||`. This field reports the API invocation, and a pass can invoke
+      // cleanly (0) and still return unparseable JSON. Rewriting that 0 to 1 tells a
+      // downstream retry that the network failed when the model just broke format.
+      // `exitStatus` below is a different question and keeps `||`.
+      status: allFailed ? (runs[0]?.status ?? 1) : 0,
+      stderr: runs.map((run) => run.stderr).filter(Boolean).join("\n"),
+      stdout: null,
+      reasoning: combinedReasoning
+    },
+    lensRuns: detailedLensRuns,
+    // Each lens runs in its own ACP thread on purpose — sharing one would let a later
+    // pass read the earlier pass's conclusions, and the passes would stop being
+    // independent. `threadId` stays the first pass for backward compatibility; callers
+    // that need all of them read this.
+    threadIds: runs.map((run) => run.threadId).filter(Boolean),
+    result: merged,
+    rawOutput: parsedResult.rawOutput,
+    parseError: parsedResult.parseError,
+    reasoningSummary: combinedReasoning
+  };
+
+  // Asking for three lenses and getting two is a degraded review, not a clean one. Exit
+  // status is what CI reads, and a green step after the security pass silently dropped
+  // out is worse than a red one. The rendered output already names which pass failed.
+  const anyFailed = failedLenses.length > 0;
+
+  return {
+    // `??` let a zero through: a pass can finish its API call cleanly (status 0) and
+    // still return JSON nothing can parse. Reporting success then tells CI the review
+    // passed when it produced no findings at all.
+    exitStatus: allFailed ? (runs[0]?.status || 1) : anyFailed ? 1 : 0,
+    threadId: firstThreadId,
+    turnId: null,
+    payload,
+    rendered: renderReviewResult(parsedResult, {
+      reviewLabel: reviewName,
+      targetLabel: context.target.label,
+      reasoningSummary: combinedReasoning,
+      showReasoning: Boolean(request.showReasoning),
+      inputMode: context.inputMode,
+      fileCount: context.fileCount,
+      diffBytes: context.diffBytes,
+      baseRef: context.target.baseRef ?? null,
+      baseWasDetected: context.target.baseSource === "detected",
+      mergeBase: context.comparison?.mergeBase ?? null,
+      lensRuns: detailedLensRuns,
+      failedLenses
+    }),
+    summary:
+      merged?.summary?.split("\n")[0] ??
+      parsedResult.parseError ??
+      `${reviewName} finished.`,
     jobTitle: `Gemini ${reviewName}`,
     jobClass: "review",
     targetLabel: context.target.label
@@ -585,11 +748,14 @@ async function executeTaskRun(request) {
   };
 }
 
-function buildReviewJobMetadata(reviewName, target) {
+function buildReviewJobMetadata(reviewName, target, lensIds = null) {
+  // A multi-lens run takes several times as long as a single pass. Saying so in the
+  // job title is what makes `/gemini:status` explain the wait instead of looking stuck.
+  const lensSuffix = lensIds?.length ? ` (${lensIds.length}-lens)` : "";
   return {
     kind: reviewName === "Adversarial Review" ? "adversarial-review" : "review",
-    title: `Gemini ${reviewName}`,
-    summary: `${reviewName} ${target.label}`
+    title: `Gemini ${reviewName}${lensSuffix}`,
+    summary: `${reviewName} ${target.label}${lensIds?.length ? ` across ${lensIds.join(", ")}` : ""}`
   };
 }
 
@@ -774,8 +940,17 @@ async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "background", "wait", "show-reasoning", "progress"],
+    optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
   });
+
+  // `--multi` is a boolean by default but also accepts an inline lens list
+  // (`--multi=security,correctness`) for narrowing the passes.
+  // Compared against undefined and false rather than truthiness: `--multi=` parses to an
+  // empty string, and treating that as "no multi" would silently run a single pass after
+  // the user explicitly asked for several.
+  const lensIds =
+    options.multi === undefined || options.multi === false ? null : resolveLensIds(options.multi);
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
@@ -790,7 +965,7 @@ async function handleReviewCommand(argv, config) {
   });
   target.baseSource = options.base ? "flag" : target.baseRef && configuredBase ? "config" : "detected";
 
-  const metadata = buildReviewJobMetadata(config.reviewName, target);
+  const metadata = buildReviewJobMetadata(config.reviewName, target, lensIds);
   const job = createCompanionJob({
     prefix: "review",
     kind: metadata.kind,
@@ -811,6 +986,7 @@ async function handleReviewCommand(argv, config) {
         focusText,
         reviewName: config.reviewName,
         showReasoning: Boolean(options["show-reasoning"]),
+        lensIds,
         onProgress: progress
       }),
     { json: options.json, forceProgress: Boolean(options.progress) }

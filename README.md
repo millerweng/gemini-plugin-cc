@@ -161,6 +161,7 @@ Reads your working-tree diff or branch diff and asks Gemini to review it. Return
 | `--base <ref>` | Review the branch diff against this ref, even if the tree is dirty |
 | `--scope auto\|working-tree\|branch` | Force what gets reviewed; `auto` is the default |
 | `--cwd <path>` | Review a different checkout, such as a worktree the session is not in |
+| `--multi[=<lens,...>]` | Run several narrow passes instead of one and merge the findings |
 | `--show-reasoning` | Include Gemini's reasoning trace in the output |
 | `--progress` | Stream progress lines even when output is being captured |
 | `--wait` / `--background` | Foreground, or detach |
@@ -178,11 +179,45 @@ If neither `--wait` nor `--background` is given, Claude estimates the review siz
 An auto-detected base spanning more than 40 files is flagged in the output, since that
 usually means the intended change is much smaller than the range being reviewed.
 
+**Multi-lens review (`--multi`)**
+
+A single pass has to weigh every concern at once, and the prompt's own calibration rules
+("prefer one strong finding over several weak ones") then push Gemini to report the issue
+it rates highest and drop the rest. `--multi` runs the same diff through three narrower
+passes instead:
+
+| Lens | Looks for |
+|---|---|
+| `correctness` | Logic errors, boundaries, unhandled error paths, broken invariants |
+| `security` | Auth and authorization gaps, isolation failures, injection, secret exposure |
+| `resilience` | Races, idempotency, partial failure, rollback and migration hazards, data loss |
+
+Findings merge when two different lenses land within five lines of each other **and**
+describe the issue in similar terms. A merged finding is marked `confirmed by 2 lenses` and
+sorted above single-lens findings of the same severity — that agreement is the signal
+multi-lens review exists to produce. Two findings from the same lens never merge, and a
+merge keeps the wording it did not promote under `Also reported as`, so nothing a lens said
+is lost.
+
+A lens that fails — unusable JSON, a rate limit, a dropped connection — is dropped with a
+warning and the passes that worked are still reported.
+
+Narrow the passes with an inline list: `--multi=security,resilience`.
+
+The passes run one after another, not in parallel. The ACP broker serves one session at a
+time, so parallel passes would each start a separate Gemini process and hit a rate limit
+that much sooner. Budget roughly one single-review duration per lens, and prefer
+`--background`.
+
+Single-pass review is unchanged and remains the default.
+
 ```bash
 /gemini:review
 /gemini:review --base main
 /gemini:review --scope branch --background
 /gemini:review --cwd ~/repo/.worktrees/feature-x
+/gemini:review --multi --background
+/gemini:review --multi=security,resilience --base main --background
 ```
 
 ---
@@ -193,12 +228,13 @@ Same target selection as `/gemini:review`, but challenges the chosen implementat
 
 **Steerable:** accepts focus text after flags to direct the review toward specific concerns.
 
-**Flags:** same as `/gemini:review`.
+**Flags:** same as `/gemini:review`, including `--multi`.
 
 ```bash
 /gemini:adversarial-review
 /gemini:adversarial-review --base main challenge the error handling strategy
 /gemini:adversarial-review challenge whether this retry logic handles all failure modes
+/gemini:adversarial-review --multi --background
 ```
 
 ---

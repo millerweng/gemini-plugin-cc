@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini code review against local git state
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -40,6 +40,13 @@ Argument handling:
 - `/gemini:review` supports working-tree review, branch review, and `--base <ref>`.
 - `/gemini:review` accepts extra focus text after the flags.
 - If the user wants a stricter framing that challenges the implementation approach, they should use `/gemini:adversarial-review`.
+
+Multi-lens review (`--multi`):
+- Default is a single pass. `--multi` runs three narrower passes over the same diff — `correctness`, `security`, `resilience` — and merges the findings.
+- A finding reported by more than one lens is marked as confirmed and sorted above single-lens findings of the same severity.
+- Narrow the passes with an inline list, for example `--multi=security,resilience`.
+- The passes run one after another, so a `--multi` review takes roughly as many times longer as it has lenses. Recommend `--background` whenever `--multi` is used, regardless of diff size.
+- Pass `--multi` through to the companion script untouched.
 
 Foreground flow:
 - Run:

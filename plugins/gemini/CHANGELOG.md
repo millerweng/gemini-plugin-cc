@@ -1,5 +1,97 @@
 # Changelog
 
+## Unreleased
+
+- `/gemini:review` and `/gemini:adversarial-review` accept `--multi`, which runs the same
+  diff through three narrow passes — `correctness`, `security`, `resilience` — and merges
+  the findings. A single pass has to hold every concern at once, and the prompt's own
+  "prefer one strong finding over several weak ones" rule then drops the rest; a
+  medium-severity permission bug loses to a high-severity logic bug in the same file.
+  Narrow the passes with `--multi=security,resilience`.
+- Findings merge only when they come from different lenses, sit within five lines of each
+  other, and their titles share at least two meaningful words covering 40% of the shorter
+  title. Position alone was tried first and was wrong in both directions: it merged a
+  logic bug and a permission bug that happened to land on adjacent lines, and it split the
+  one bug two lenses actually agreed on because their line numbers differed by three.
+- Merging is lossless. The wording a merge does not promote is kept as `Also reported as`
+  and `Alternative recommendation`, so a wrong merge costs a duplicated line in the report
+  rather than a deleted finding.
+- Two findings from the same lens never merge. A lens reporting two problems a line apart
+  found two problems, and collapsing them deleted one and labelled the survivor as
+  corroborated when nothing corroborated it.
+- A lens that returns unusable JSON no longer costs the whole review. The failed pass is
+  named in the output and the passes that worked are still reported. The same now holds
+  for a pass that throws: a rate limit on the third lens used to discard the two that had
+  already finished and already cost their tokens.
+- `--multi=` with an empty value runs every lens instead of silently falling back to a
+  single pass. The empty string is falsy, so the truthiness check read an explicit request
+  for several passes as no request at all.
+- A group refuses a lens it already holds. The same-lens guard sits inside the pairwise
+  comparison, which only ever sees the group's representative — so a wide finding from one
+  lens could bridge two separate findings from another into one group, and the merge then
+  deleted one of them. The guard prevented the direct case and missed the indirect one.
+- A multi-lens review where every pass returns unparseable JSON now exits non-zero. The
+  status was read with `??`, which passes a zero through, and a pass can finish its API
+  call cleanly and still return JSON nothing can parse — CI was told the review passed
+  when it had produced nothing.
+- The payload's `threadId` is the first pass that actually produced one, not index 0. A
+  rate limit on the first lens left it null and reported no resumable thread even though
+  later passes had run fine.
+- The payload carries `threadIds` for every pass. Each lens runs in its own ACP thread on
+  purpose — sharing one would let a later pass read the earlier pass's conclusions and the
+  passes would stop being independent — but only the first thread id was reachable.
+- The passes run serially. The ACP broker serves one session at a time, so parallel passes
+  fall back to a direct transport and start a Gemini process each, which reaches a
+  rate limit that much faster.
+- `parseArgs` gained optional-value flags. `--multi` had to work bare and with an inline
+  list, and neither existing kind could do that: a boolean coerced `--multi=security` to
+  `true` and silently dropped the lens list, while a value option made bare `--multi`
+  swallow the following word of focus text.
+- `alternate_bodies` reaches the report. The merge computed it and the renderer dropped it
+  on the floor, which made "merging is lossless" false for the field most likely to differ
+  between lenses — how each one describes the impact.
+- A partial multi-lens review exits non-zero. Asking for three lenses and getting two is a
+  degraded review; a green CI step after the security pass dropped out is worse than a red
+  one. The rendered warning now says the exit will be non-zero.
+- Failed passes keep their `rawOutput` in `lensRuns`, and the terminal prints it under the
+  partial-failure warning, truncated at 2000 characters. It was discarded unless every
+  pass failed, and then for a while it reached `--json` only — "JSON parse failed" does
+  not say whether the model refused, ran out of tokens, or wrapped the block in prose, and
+  needing a `--json` rerun to find out means paying for the review twice.
+- `payload.gemini.status` keeps a successful `0` when the JSON is unparseable. It reports
+  the API invocation, not the command outcome, and briefly shared the `||` that `exitStatus`
+  needs — which told a downstream retry the network had failed when the model had only
+  broken format. The two fields answer different questions and now read the status
+  differently.
+- Finding titles are tokenized with a Unicode-aware pattern, and scripts written without
+  spaces between words are cut into character pairs. The old `[^a-z0-9\s]` stripped every
+  non-ASCII character, which emptied any title not written in English — and an empty token
+  set makes every comparison false, so merging was silently off for those reviews and the
+  same finding appeared twice.
+- The body promoted by a merge is chosen among findings that share the merged severity.
+  Picking the longest body from the whole group let a low-severity finding's wordy
+  explanation headline a critical one.
+- Raw model output is fenced with a backtick run longer than any inside it. A fixed ```
+  fence ended at the first ``` in the payload, and the rest of that untrusted text was
+  rendered as markup.
+- A review where every pass fails now lists the passes and prints each one's output. That
+  path returned early, before the per-lens reporting, so the case with the least to show
+  for itself showed the least about why.
+- Known and not addressed: a `--background --multi` review collects the diff once, but a
+  later pass calling Gemini's `codebase_investigator` reads the working tree as it is at
+  that moment. Editing files or switching branches mid-review can leave a later pass
+  reasoning about a tree its diff no longer describes. This is inherent to any review that
+  outlives its diff, single-pass included, and pinning the tree would mean reviewing from
+  a temporary worktree.
+- `--multi=true` no longer aborts the run. `"false"` was coerced to a boolean and `"true"`
+  was not, so it reached the lens lookup as a lens named `true`.
+- Single-pass review is untouched. The lens directive interpolates to an empty string, so
+  the prompt sent for a default review is byte-identical to the previous release's — 3133
+  and 4126 bytes, unchanged. The placeholder sits on its own line and that line's newline
+  replaces the blank line it appears to remove; `tests/prompt-lens-placeholder.test.mjs`
+  pins the spacing, because reading the diff alone suggests a newline went missing and
+  "restoring" it would add a third one.
+
 ## 1.3.0
 
 - Reviews no longer ask Gemini to fetch the diff itself. A review runs in Gemini's plan

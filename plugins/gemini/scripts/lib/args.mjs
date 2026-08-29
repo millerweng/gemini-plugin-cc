@@ -1,6 +1,11 @@
 export function parseArgs(argv, config = {}) {
   const valueOptions = new Set(config.valueOptions ?? []);
   const booleanOptions = new Set(config.booleanOptions ?? []);
+  // A flag that works bare (`--multi`) but also takes an inline value
+  // (`--multi=security,correctness`). Declaring it boolean instead would coerce the
+  // inline value to `true` and silently drop it; declaring it a value option would
+  // make the bare form eat the next token, which for these commands is focus text.
+  const optionalValueOptions = new Set(config.optionalValueOptions ?? []);
   const aliasMap = config.aliasMap ?? {};
   const options = {};
   const positionals = [];
@@ -12,7 +17,7 @@ export function parseArgs(argv, config = {}) {
   // reported success on a build that had no such flag.
   const rejectUnknownOptions = config.rejectUnknownOptions === true;
   const unknownOption = (token) => {
-    const known = [...booleanOptions, ...valueOptions].sort();
+    const known = [...booleanOptions, ...valueOptions, ...optionalValueOptions].sort();
     return new Error(
       `Unknown option ${token}. This command accepts: ${known.map((name) => `--${name}`).join(", ")}.`
     );
@@ -40,6 +45,21 @@ export function parseArgs(argv, config = {}) {
       const [rawKey, inlineValue] = token.slice(2).split("=", 2);
       const key = aliasMap[rawKey] ?? rawKey;
 
+      if (optionalValueOptions.has(key)) {
+        if (inlineValue === undefined) {
+          options[key] = true;
+        } else if (inlineValue === "false") {
+          options[key] = false;
+        } else if (inlineValue === "true") {
+          // Coerced for symmetry with "false". Left as a string it reached the lens
+          // lookup as a lens literally named "true" and aborted the run.
+          options[key] = true;
+        } else {
+          options[key] = inlineValue;
+        }
+        continue;
+      }
+
       if (booleanOptions.has(key)) {
         options[key] = inlineValue === undefined ? true : inlineValue !== "false";
         continue;
@@ -66,6 +86,11 @@ export function parseArgs(argv, config = {}) {
 
     const shortKey = token.slice(1);
     const key = aliasMap[shortKey] ?? shortKey;
+
+    if (optionalValueOptions.has(key)) {
+      options[key] = true;
+      continue;
+    }
 
     if (booleanOptions.has(key)) {
       options[key] = true;

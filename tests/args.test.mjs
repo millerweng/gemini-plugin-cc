@@ -60,3 +60,35 @@ test("everything after -- stays positional even under rejectUnknownOptions", () 
 
   assert.deepEqual(positionals, ["--not-a-flag"]);
 });
+
+test("an optional-value flag works bare without eating the next token", () => {
+  const { options, positionals } = parseArgs(["--multi", "focus", "text"], {
+    optionalValueOptions: ["multi"]
+  });
+  assert.equal(options.multi, true);
+  assert.deepEqual(positionals, ["focus", "text"]);
+});
+
+test("an optional-value flag keeps its inline value instead of coercing to true", () => {
+  const { options } = parseArgs(["--multi=security,correctness"], {
+    optionalValueOptions: ["multi"]
+  });
+  assert.equal(options.multi, "security,correctness");
+});
+
+test("an optional-value flag can be switched off inline", () => {
+  const { options } = parseArgs(["--multi=false"], { optionalValueOptions: ["multi"] });
+  assert.equal(options.multi, false);
+});
+
+test("an optional-value flag is listed in the unknown-option hint", () => {
+  assert.throws(
+    () => parseArgs(["--nope"], { optionalValueOptions: ["multi"], rejectUnknownOptions: true }),
+    /--multi/
+  );
+});
+
+test("an optional-value flag coerces the string \"true\" like it coerces \"false\"", () => {
+  const { options } = parseArgs(["--multi=true"], { optionalValueOptions: ["multi"] });
+  assert.equal(options.multi, true);
+});

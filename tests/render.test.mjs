@@ -391,3 +391,164 @@ test("a short reasoning trace is shown whole with no omission notice", () => {
   assert.match(output, /only step/);
   assert.doesNotMatch(output, /earlier entries omitted/);
 });
+
+test("a multi-lens finding renders every wording the merge kept", () => {
+  const output = renderReviewResult(
+    {
+      parsed: {
+        verdict: "needs-attention",
+        summary: "Correctness: bad.\nSecurity: also bad.",
+        findings: [
+          {
+            severity: "critical",
+            title: "Merge drops findings",
+            body: "The primary explanation.",
+            file: "src/merge.mjs",
+            line_start: 10,
+            line_end: 12,
+            recommendation: "Guard the group.",
+            lenses: ["correctness", "security"],
+            lens_hits: 2,
+            alternate_titles: ["Merge silently discards findings"],
+            alternate_recommendations: ["Compare titles first."],
+            alternate_bodies: ["A different account of the impact."]
+          }
+        ],
+        next_steps: []
+      }
+    },
+    {
+      reviewLabel: "Adversarial Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        { lens: "correctness", ok: true, findingCount: 1, parseError: null },
+        { lens: "security", ok: true, findingCount: 1, parseError: null }
+      ]
+    }
+  );
+
+  assert.match(output, /Lenses: correctness \(1\), security \(1\)/);
+  assert.match(output, /confirmed by 2 lenses: correctness, security/);
+  assert.match(output, /Also reported as: Merge silently discards findings/);
+  assert.match(output, /Alternative explanation: A different account of the impact\./);
+  assert.match(output, /Alternative recommendation: Compare titles first\./);
+});
+
+test("a partial multi-lens review warns and says the exit is non-zero", () => {
+  const output = renderReviewResult(
+    { parsed: { verdict: "needs-attention", summary: "", findings: [], next_steps: [] } },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        { lens: "correctness", ok: true, findingCount: 0, parseError: null },
+        { lens: "security", ok: false, findingCount: 0, parseError: "not JSON" }
+      ]
+    }
+  );
+
+  assert.match(output, /security — failed/);
+  assert.match(output, /exits non-zero/);
+  assert.match(output, /not JSON/);
+});
+
+test("a failed pass prints the text the model actually returned", () => {
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "", findings: [], next_steps: [] } },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        { lens: "correctness", ok: true, findingCount: 0, parseError: null, rawOutput: null },
+        {
+          lens: "security",
+          ok: false,
+          findingCount: 0,
+          parseError: "Bad control character in string literal",
+          rawOutput: "I cannot review this diff because it exceeds my context window."
+        }
+      ]
+    }
+  );
+
+  assert.match(output, /Raw output from the security pass:/);
+  assert.match(output, /exceeds my context window/);
+});
+
+test("a very long raw output is truncated with a pointer to the json payload", () => {
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "", findings: [], next_steps: [] } },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        {
+          lens: "security",
+          ok: false,
+          findingCount: 0,
+          parseError: "not JSON",
+          rawOutput: "x".repeat(5000)
+        }
+      ]
+    }
+  );
+
+  assert.match(output, /more characters; full text is in the --json payload/);
+  assert.ok(output.length < 5000, "the full 5000-character body must not reach the terminal");
+});
+
+test("a failed pass with no raw output still renders the warning", () => {
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "", findings: [], next_steps: [] } },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [{ lens: "security", ok: false, findingCount: 0, parseError: "no output", rawOutput: null }]
+    }
+  );
+
+  assert.match(output, /security — failed/);
+  assert.ok(!output.includes("Raw output from"));
+});
+
+test("a total multi-lens failure still names each pass and prints its output", () => {
+  const output = renderReviewResult(
+    { parsed: null, parseError: "Every lens failed to return parseable JSON", rawOutput: "joined" },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        { lens: "correctness", ok: false, findingCount: 0, parseError: "bad JSON", rawOutput: "correctness said this" },
+        { lens: "security", ok: false, findingCount: 0, parseError: "empty", rawOutput: "security said that" }
+      ]
+    }
+  );
+
+  assert.match(output, /correctness — failed/);
+  assert.match(output, /security — failed/);
+  assert.match(output, /Raw output from the correctness pass:/);
+  assert.match(output, /correctness said this/);
+  assert.match(output, /security said that/);
+});
+
+test("raw output containing a code fence cannot break out of its block", () => {
+  const hostile = 'text before\n```\n# Injected heading\n[click](command:evil)\n```\nafter';
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "", findings: [], next_steps: [] } },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      lensRuns: [
+        { lens: "security", ok: false, findingCount: 0, parseError: "not JSON", rawOutput: hostile }
+      ]
+    }
+  );
+
+  // The wrapping fence must be longer than any run of backticks inside the payload.
+  const fenceLine = output.split("\n").find((line) => /^`{4,}text$/.test(line));
+  assert.ok(fenceLine, "expected a fence longer than the three backticks in the payload");
+
+  const fence = fenceLine.replace(/text$/, "");
+  const occurrences = output.split(fence).length - 1;
+  assert.equal(occurrences, 2, "the payload must be wrapped by exactly one fence pair");
+});

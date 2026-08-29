@@ -35,7 +35,7 @@ If the user supplied a focus area, weight it heavily, but still report any other
 If you need deeper context on how a file is used elsewhere, call Gemini CLI's built-in `codebase_investigator` subagent — it ships with the `codebase-investigation` skill and will return a focused map of call sites, invariants, and hidden dependencies before you finalize findings.
 {{REVIEW_COLLECTION_GUIDANCE}}
 </review_method>
-
+{{LENS_DIRECTIVE}}
 <finding_bar>
 Report only material findings.
 Do not include style feedback, naming feedback, low-value cleanup, or speculative concerns without evidence.

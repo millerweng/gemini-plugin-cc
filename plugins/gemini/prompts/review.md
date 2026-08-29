@@ -23,7 +23,7 @@ Where the diff touches shared state, persistence, auth, or failure handling, dig
 If you need deeper context you can call Gemini CLI's built-in `codebase_investigator` subagent to explore the repo before drafting findings — it has the `codebase-investigation` skill loaded by default.
 {{REVIEW_COLLECTION_GUIDANCE}}
 </review_method>
-
+{{LENS_DIRECTIVE}}
 <finding_bar>
 Every finding must answer:
 1. What can go wrong?

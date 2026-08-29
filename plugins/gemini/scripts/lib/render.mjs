@@ -61,7 +61,22 @@ function normalizeReviewFinding(finding, index) {
     file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
     line_start: lineStart,
     line_end: lineEnd,
-    recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
+    recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : "",
+    // Present only on a multi-lens review; the merge step attaches which passes
+    // reported this finding, plus whatever wording it did not promote to a primary
+    // field so the merge stays lossless.
+    lenses: Array.isArray(source.lenses) ? source.lenses.filter((lens) => typeof lens === "string") : null,
+    alternate_titles: Array.isArray(source.alternate_titles)
+      ? source.alternate_titles.filter((title) => typeof title === "string" && title.trim())
+      : [],
+    alternate_recommendations: Array.isArray(source.alternate_recommendations)
+      ? source.alternate_recommendations.filter((text) => typeof text === "string" && text.trim())
+      : [],
+    // The merge computes this; dropping it here made "merging is lossless" false for the
+    // one field most likely to differ between lenses — the explanation of the impact.
+    alternate_bodies: Array.isArray(source.alternate_bodies)
+      ? source.alternate_bodies.filter((text) => typeof text === "string" && text.trim())
+      : []
   };
 }
 
@@ -254,6 +269,46 @@ export function renderSetupReport(report) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+// A failed pass can return a whole file's worth of text. Enough to identify the failure
+// mode belongs on the terminal; the rest stays in the JSON payload.
+const RAW_OUTPUT_TERMINAL_LIMIT = 2000;
+
+function truncateRawOutput(text) {
+  const value = String(text);
+  if (value.length <= RAW_OUTPUT_TERMINAL_LIMIT) return value;
+  const omitted = value.length - RAW_OUTPUT_TERMINAL_LIMIT;
+  return `${value.slice(0, RAW_OUTPUT_TERMINAL_LIMIT)}\n... [${omitted} more characters; full text is in the --json payload]`;
+}
+
+// The text being fenced is model output about an untrusted diff, and a fixed ```
+// fence ends at the first ``` inside it — everything after that escapes the code block
+// and is rendered as markup. The fence has to outrun the longest run of backticks in
+// the content it wraps.
+function fenceFor(text) {
+  let longest = 0;
+  for (const match of String(text).matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length);
+  }
+  return "`".repeat(Math.max(3, longest + 1));
+}
+
+function pushFencedBlock(lines, text, language = "text") {
+  const fence = fenceFor(text);
+  lines.push(`${fence}${language}`, text, fence);
+}
+
+// Shared so a total failure shows the same per-pass detail a partial one does. Keeping
+// the raw output only on the partial path meant the case where every pass failed — the
+// one that most needs the model's own words — printed the least.
+function appendFailedLensOutput(lines, lensRuns) {
+  for (const run of lensRuns) {
+    if (run.ok || !run.rawOutput) continue;
+    lines.push(`Raw output from the ${run.lens} pass:`, "");
+    pushFencedBlock(lines, truncateRawOutput(run.rawOutput));
+    lines.push("");
+  }
+}
+
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
     // An empty parseError renders as a bare label with nothing after it, which tells
@@ -270,8 +325,18 @@ export function renderReviewResult(parsedResult, meta) {
       `- Parse error: ${reason}`
     ];
 
-    if (parsedResult.rawOutput) {
-      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    if (Array.isArray(meta.lensRuns) && meta.lensRuns.length > 0) {
+      lines.push(
+        "",
+        `Lenses: ${meta.lensRuns
+          .map((run) => (run.ok ? `${run.lens} (${run.findingCount})` : `${run.lens} — failed`))
+          .join(", ")}`,
+        ""
+      );
+      appendFailedLensOutput(lines, meta.lensRuns);
+    } else if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "");
+      pushFencedBlock(lines, parsedResult.rawOutput);
     }
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
@@ -291,7 +356,8 @@ export function renderReviewResult(parsedResult, meta) {
     ];
 
     if (parsedResult.rawOutput) {
-      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+      lines.push("", "Raw final message:", "");
+      pushFencedBlock(lines, parsedResult.rawOutput);
     }
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
@@ -308,6 +374,27 @@ export function renderReviewResult(parsedResult, meta) {
     `Verdict: ${data.verdict}`,
     ""
   ];
+
+  if (Array.isArray(meta.lensRuns) && meta.lensRuns.length > 0) {
+    const passes = meta.lensRuns
+      .map((run) => (run.ok ? `${run.lens} (${run.findingCount})` : `${run.lens} — failed`))
+      .join(", ");
+    lines.push(`Lenses: ${passes}`, "");
+    const failed = meta.lensRuns.filter((run) => !run.ok);
+    if (failed.length > 0) {
+      lines.push(
+        `Warning: ${failed.length} of ${meta.lensRuns.length} lenses produced no usable result, so this review is partial and the command exits non-zero. Failed: ${failed
+          .map((run) => `${run.lens} (${run.parseError ?? "no output"})`)
+          .join("; ")}`,
+        ""
+      );
+
+      // "JSON parse failed" does not say whether the model refused, ran out of tokens,
+      // or wrapped the block in prose. The text it actually returned does, and requiring
+      // a --json rerun to see it means re-paying for the review.
+      appendFailedLensOutput(lines, failed);
+    }
+  }
 
   if (data.summary) {
     lines.push(data.summary, "");
@@ -356,12 +443,31 @@ export function renderReviewResult(parsedResult, meta) {
     lines.push("Findings:");
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
-      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
+      // Two independent lenses landing on the same code is the signal a multi-lens
+      // review exists to produce, so it goes on the headline, not in a footnote.
+      const lensSuffix =
+        Array.isArray(finding.lenses) && finding.lenses.length > 0
+          ? finding.lenses.length > 1
+            ? ` [confirmed by ${finding.lenses.length} lenses: ${finding.lenses.join(", ")}]`
+            : ` [${finding.lenses[0]}]`
+          : "";
+      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})${lensSuffix}`);
       if (finding.body) {
         lines.push(`  ${finding.body}`);
       }
+      // A second lens describing the same code differently is signal, not noise: it
+      // often names the consequence the first wording left out.
+      for (const title of finding.alternate_titles ?? []) {
+        lines.push(`  Also reported as: ${title}`);
+      }
+      for (const body of finding.alternate_bodies ?? []) {
+        lines.push(`  Alternative explanation: ${body}`);
+      }
       if (finding.recommendation) {
         lines.push(`  Recommendation: ${finding.recommendation}`);
+      }
+      for (const recommendation of finding.alternate_recommendations ?? []) {
+        lines.push(`  Alternative recommendation: ${recommendation}`);
       }
     }
   }
