@@ -552,3 +552,34 @@ test("raw output containing a code fence cannot break out of its block", () => {
   const occurrences = output.split(fence).length - 1;
   assert.equal(occurrences, 2, "the payload must be wrapped by exactly one fence pair");
 });
+
+test("advice from another lens is promoted when the finding has none of its own", () => {
+  const output = renderReviewResult(
+    {
+      parsed: {
+        verdict: "needs-attention",
+        summary: "",
+        findings: [
+          {
+            severity: "high",
+            title: "Merge drops findings",
+            body: "The winning explanation.",
+            file: "src/merge.mjs",
+            line_start: 10,
+            line_end: 12,
+            recommendation: "",
+            lenses: ["correctness", "security"],
+            lens_hits: 2,
+            alternate_recommendations: ["Guard the group.", "And compare titles."]
+          }
+        ],
+        next_steps: []
+      }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree diff" }
+  );
+
+  assert.match(output, /Recommendation \(from another lens\): Guard the group\./);
+  assert.match(output, /Alternative recommendation: And compare titles\./);
+  assert.ok(!/^\s*Recommendation: /m.test(output), "must not print an empty primary recommendation");
+});

@@ -541,3 +541,58 @@ test("a recommendation is not lost when the promoted finding has none", () => {
   const allAdvice = [entry.recommendation, ...(entry.alternate_recommendations ?? [])];
   assert.ok(allAdvice.includes("The only advice anyone gave."), "advice must survive somewhere");
 });
+
+// Reported twice by adversarial review as a wildcard that swallows nearby findings. The
+// guard is at the top of titlesLookRelated and these pin it, because removing it would
+// make an all-stopword title compare equal to everything within five lines.
+test("a title that is entirely stopwords matches nothing", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Potential issue", line_start: 10, line_end: 10 })] }),
+    run("security", {
+      findings: [finding({ title: "Tenant isolation bypass in the query builder", line_start: 11, line_end: 11 })]
+    })
+  ]);
+
+  assert.equal(merged.findings.length, 2, "a vague title must not absorb a specific one");
+  assert.ok(merged.findings.every((entry) => entry.lens_hits === 1));
+});
+
+test("two all-stopword titles do not merge with each other either", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Potential issue", line_start: 10, line_end: 10 })] }),
+    run("security", { findings: [finding({ title: "Possible problem", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 2);
+});
+
+test("an empty recommendation on the promoted finding is not filled from another", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings",
+          body: "Short.",
+          recommendation: "Advice belonging to the short body."
+        })
+      ]
+    }),
+    run("security", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings silently",
+          body: "A considerably longer explanation that wins the body slot.",
+          recommendation: "",
+          line_start: 11
+        })
+      ]
+    })
+  ]);
+
+  const [entry] = merged.findings;
+  assert.match(entry.body, /considerably longer/);
+  assert.equal(entry.recommendation, "", "the promoted finding gave no advice; none may be invented for it");
+  assert.deepEqual(entry.alternate_recommendations, ["Advice belonging to the short body."]);
+});

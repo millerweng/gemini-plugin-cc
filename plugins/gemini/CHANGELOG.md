@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.2
+
+- An empty recommendation on the finding that supplied the body is respected instead of
+  being filled in from another finding. `||` treated "this finding has no advice" as
+  "look elsewhere", which reintroduced the mismatched pairing 1.4.1 set out to fix. The
+  other finding's advice still appears among the alternates.
+- When the promoted finding carries no advice of its own, an alternate is promoted in the
+  wording — "Recommendation (from another lens)" — rather than printed as a footnote to a
+  primary recommendation that is not there.
+
 ## 1.4.1
 
 - A merged finding's recommendation comes from the same finding as its body. The body was

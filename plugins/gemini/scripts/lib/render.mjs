@@ -463,11 +463,20 @@ export function renderReviewResult(parsedResult, meta) {
       for (const body of finding.alternate_bodies ?? []) {
         lines.push(`  Alternative explanation: ${body}`);
       }
+      // The promoted finding can carry no advice of its own while another lens in the
+      // group had some. Labelling that one "Alternative" with no primary above it reads
+      // like a footnote to nothing, so it is promoted in the wording instead.
+      const alternates = finding.alternate_recommendations ?? [];
       if (finding.recommendation) {
         lines.push(`  Recommendation: ${finding.recommendation}`);
-      }
-      for (const recommendation of finding.alternate_recommendations ?? []) {
-        lines.push(`  Alternative recommendation: ${recommendation}`);
+        for (const recommendation of alternates) {
+          lines.push(`  Alternative recommendation: ${recommendation}`);
+        }
+      } else if (alternates.length > 0) {
+        lines.push(`  Recommendation (from another lens): ${alternates[0]}`);
+        for (const recommendation of alternates.slice(1)) {
+          lines.push(`  Alternative recommendation: ${recommendation}`);
+        }
       }
     }
   }

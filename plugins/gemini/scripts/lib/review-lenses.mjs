@@ -185,6 +185,10 @@ const TITLE_OVERLAP_THRESHOLD = 0.4;
 function titlesLookRelated(left, right) {
   const leftTokens = titleTokens(left);
   const rightTokens = titleTokens(right);
+  // Bails before any of the size logic below. A title that is entirely stopwords tokenizes
+  // to nothing, and without this an empty set would compare equal to every other title and
+  // swallow whatever sits near it. Adversarial review has flagged the absence of this
+  // guard twice; it is here, and the test suite pins it.
   if (leftTokens.size === 0 || rightTokens.size === 0) return false;
 
   let shared = 0;
@@ -299,7 +303,11 @@ function mergeFindingGroup(group) {
   // `primary` instead paired one finding's detailed explanation with another finding's
   // advice, and the two could be about different aspects of the same code.
   const primaryBody = richest.body ?? primary.body;
-  const primaryRecommendation = richest.recommendation || primary.recommendation || "";
+  // `??`, not `||`. An empty recommendation from `richest` is that finding saying it has
+  // no advice, and falling through to `primary` on it would pair this body with another
+  // finding's advice — the pairing this binding exists to prevent. Nothing is lost:
+  // `primary`'s advice still appears among the alternates below.
+  const primaryRecommendation = richest.recommendation ?? primary.recommendation ?? "";
   const recommendations = uniqueText([
     primaryRecommendation,
     ...sorted.map((entry) => entry.finding.recommendation)
