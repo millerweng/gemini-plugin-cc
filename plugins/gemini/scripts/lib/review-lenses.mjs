@@ -116,10 +116,16 @@ const LINE_PROXIMITY_SLACK = 5;
 // issue in handler" and "possible issue in parser" look related because they share
 // "issue" and "in".
 const TITLE_STOPWORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "for", "from", "has",
-  "in", "is", "issue", "it", "may", "might", "no", "not", "of", "on", "or", "possible",
-  "potential", "problem", "the", "there", "this", "to", "when", "with", "without"
+  "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "do", "for", "from",
+  "go", "has", "if", "in", "is", "issue", "it", "may", "might", "no", "not", "of", "on",
+  "or", "possible", "potential", "problem", "so", "the", "there", "this", "to", "up",
+  "we", "when", "with", "without"
 ]);
+
+// Two letters is a real word in this domain — DB, UI, OS, IP, VM, PR, S3. Dropping them
+// left "Missing DB lock" and "Missing UI lock" with the same two tokens, and near enough
+// in one file they merged into a single finding that was neither.
+const MIN_TITLE_WORD_LENGTH = 2;
 
 // Two lenses writing about one bug pick different word forms for it — "drops findings"
 // against "destroys distinct bug reports". Trimming a trailing plural is crude but it is
@@ -160,7 +166,7 @@ function titleTokens(title) {
       continue;
     }
 
-    if (word.length > 2 && !TITLE_STOPWORDS.has(word)) {
+    if (word.length >= MIN_TITLE_WORD_LENGTH && !TITLE_STOPWORDS.has(word)) {
       tokens.add(stemWord(word));
     }
   }
@@ -185,9 +191,23 @@ function titlesLookRelated(left, right) {
   for (const token of leftTokens) {
     if (rightTokens.has(token)) shared += 1;
   }
-  if (shared < MIN_SHARED_TITLE_WORDS) return false;
 
-  return shared / Math.min(leftTokens.size, rightTokens.size) >= TITLE_OVERLAP_THRESHOLD;
+  // A title can reduce to one meaningful word — "Deadlock", "XSS", "OOM". Demanding two
+  // shared words made those unmergeable however exactly they matched, so two lenses
+  // naming the same well-known issue lost the corroboration entirely. Below the
+  // threshold the shorter title has to be fully covered instead.
+  const smaller = Math.min(leftTokens.size, rightTokens.size);
+  if (smaller < MIN_SHARED_TITLE_WORDS) return shared === smaller;
+
+  // Same number of words, agreeing on all but one: that one word is doing the
+  // distinguishing. "Missing DB lock" and "Missing UI lock" share two of three tokens and
+  // clear the overlap threshold comfortably, yet name different bugs — the subsystem is
+  // the whole content of the title. Two lenses restating one bug almost always differ by
+  // more than a single word, so this costs little and stops the substitution case.
+  if (leftTokens.size === rightTokens.size && shared === leftTokens.size - 1) return false;
+
+  if (shared < MIN_SHARED_TITLE_WORDS) return false;
+  return shared / smaller >= TITLE_OVERLAP_THRESHOLD;
 }
 
 function positionsOverlap(left, right) {
@@ -273,14 +293,23 @@ function mergeFindingGroup(group) {
   const alternateTitles = uniqueText(sorted.slice(1).map((entry) => entry.finding.title)).filter(
     (title) => title.toLowerCase() !== String(primary.title ?? "").trim().toLowerCase()
   );
-  const recommendations = uniqueText(sorted.map((entry) => entry.finding.recommendation));
   const bodies = uniqueText(sorted.map((entry) => entry.finding.body));
+
+  // The body comes from `richest`, so the recommendation has to as well. Taking it from
+  // `primary` instead paired one finding's detailed explanation with another finding's
+  // advice, and the two could be about different aspects of the same code.
+  const primaryBody = richest.body ?? primary.body;
+  const primaryRecommendation = richest.recommendation || primary.recommendation || "";
+  const recommendations = uniqueText([
+    primaryRecommendation,
+    ...sorted.map((entry) => entry.finding.recommendation)
+  ]);
 
   const merged = {
     ...primary,
     severity: primary.severity,
-    body: richest.body ?? primary.body,
-    recommendation: recommendations[0] ?? "",
+    body: primaryBody,
+    recommendation: primaryRecommendation,
     lenses,
     lens_hits: lenses.length
   };
@@ -288,8 +317,14 @@ function mergeFindingGroup(group) {
   if (alternateTitles.length > 0) {
     merged.alternate_titles = alternateTitles;
   }
-  if (recommendations.length > 1) {
-    merged.alternate_recommendations = recommendations.slice(1);
+  // Filtered by value, not by index. `primaryRecommendation` can be empty when neither
+  // the richest nor the primary finding supplied one, and slicing from index 1 would then
+  // drop a real recommendation that some other finding in the group did supply.
+  const otherRecommendations = recommendations.filter(
+    (text) => text !== merged.recommendation
+  );
+  if (otherRecommendations.length > 0) {
+    merged.alternate_recommendations = otherRecommendations;
   }
   if (bodies.length > 1) {
     merged.alternate_bodies = bodies.filter((body) => body !== merged.body);

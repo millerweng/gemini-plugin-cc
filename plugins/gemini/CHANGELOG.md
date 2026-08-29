@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.1
+
+- A merged finding's recommendation comes from the same finding as its body. The body was
+  taken from the longest explanation at the merged severity and the recommendation from
+  the highest-severity finding, which are not always the same one — so a detailed account
+  of one aspect of a bug could arrive with advice about another.
+- Alternate recommendations are filtered by value rather than sliced by index, so advice
+  from a second lens survives even when the promoted finding carried none of its own.
+- Two-letter words are kept when tokenizing titles. `DB`, `UI`, `OS`, `IP`, `S3` and `PR`
+  are words in this domain, and dropping them left titles that differ only by subsystem
+  looking identical.
+- Titles that use the same words except one no longer merge. "Missing DB lock" and
+  "Missing UI lock" share two of three tokens and clear the overlap threshold, but the one
+  word they disagree on is the entire content of the title. Two lenses restating one bug
+  differ by more than a single word.
+- A one-word title merges when both lenses use it. Requiring two shared words made
+  "Deadlock", "XSS" and "OOM" unmergeable however exactly they matched, so two lenses
+  naming the same well-known issue lost the corroboration signal.
+
 ## 1.4.0
 
 - `/gemini:review` and `/gemini:adversarial-review` accept `--multi`, which runs the same

@@ -583,6 +583,12 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
   // The first pass is not necessarily the one that produced a thread. When it fails on a
   // rate limit its threadId is null, and pinning the payload to index 0 would report no
   // thread at all even though later passes ran fine and are resumable.
+  //
+  // Reported twice by adversarial review as a hazard: resume this thread, ask about a
+  // security finding, and land in the correctness pass that was told to ignore security.
+  // That chain does not exist. Review sessions never call `recordPersistentSession` —
+  // only `executeTaskRun` passes `persistThread` — so they never enter the session index
+  // that `--resume-last` reads. This id is for reporting; every pass is in `threadIds`.
   const firstThreadId = runs.find((run) => run.threadId)?.threadId ?? null;
 
   // Built once so the renderer sees the same per-pass detail the JSON payload carries.

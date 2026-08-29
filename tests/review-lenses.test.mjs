@@ -442,3 +442,102 @@ test("the primary body comes from a finding at the primary severity", () => {
   assert.equal(entry.body, "Short but critical.");
   assert.ok(entry.alternate_bodies.some((body) => body.includes("minor explanation")));
 });
+
+test("two-letter acronyms survive tokenization and keep distinct bugs apart", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Missing DB lock", line_start: 10, line_end: 10 })] }),
+    run("security", { findings: [finding({ title: "Missing UI lock", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 2, "DB and UI must not reduce to the same tokens");
+});
+
+test("the same acronym in both titles still merges", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Missing DB lock", line_start: 10, line_end: 10 })] }),
+    run("security", { findings: [finding({ title: "Missing DB lock check", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 1);
+  assert.equal(merged.findings[0].lens_hits, 2);
+});
+
+test("a one-word title merges when both lenses use it", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Deadlock", line_start: 10, line_end: 10 })] }),
+    run("resilience", { findings: [finding({ title: "Deadlock", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 1);
+  assert.equal(merged.findings[0].lens_hits, 2);
+});
+
+test("different one-word titles still stay apart", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Deadlock", line_start: 10, line_end: 10 })] }),
+    run("resilience", { findings: [finding({ title: "Livelock", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 2);
+});
+
+test("the promoted recommendation comes from the same finding as the promoted body", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings",
+          body: "Short.",
+          recommendation: "Advice tied to the short body."
+        })
+      ]
+    }),
+    run("security", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings silently",
+          body: "A considerably longer explanation of the same defect.",
+          recommendation: "Advice tied to the long body.",
+          line_start: 11
+        })
+      ]
+    })
+  ]);
+
+  const [entry] = merged.findings;
+  assert.match(entry.body, /considerably longer/);
+  assert.equal(entry.recommendation, "Advice tied to the long body.");
+  assert.deepEqual(entry.alternate_recommendations, ["Advice tied to the short body."]);
+});
+
+test("a recommendation is not lost when the promoted finding has none", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings",
+          body: "A long explanation that wins the body slot.",
+          recommendation: ""
+        })
+      ]
+    }),
+    run("security", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings silently",
+          body: "Short.",
+          recommendation: "The only advice anyone gave.",
+          line_start: 11
+        })
+      ]
+    })
+  ]);
+
+  const [entry] = merged.findings;
+  const allAdvice = [entry.recommendation, ...(entry.alternate_recommendations ?? [])];
+  assert.ok(allAdvice.includes("The only advice anyone gave."), "advice must survive somewhere");
+});
