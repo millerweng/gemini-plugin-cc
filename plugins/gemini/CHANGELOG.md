@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
 
 - `/gemini:review` and `/gemini:adversarial-review` accept `--multi`, which runs the same
   diff through three narrow passes — `correctness`, `security`, `resilience` — and merges
