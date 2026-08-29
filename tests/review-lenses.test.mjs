@@ -596,3 +596,80 @@ test("an empty recommendation on the promoted finding is not filled from another
   assert.equal(entry.recommendation, "", "the promoted finding gave no advice; none may be invented for it");
   assert.deepEqual(entry.alternate_recommendations, ["Advice belonging to the short body."]);
 });
+
+test("an omitted recommendation key does not pull in another finding's advice", () => {
+  const withoutKey = finding({
+    severity: "high",
+    title: "Merge drops review findings silently",
+    body: "A considerably longer explanation that wins the body slot.",
+    line_start: 11
+  });
+  delete withoutKey.recommendation;
+
+  const { merged } = mergeLensReviews([
+    run("correctness", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings",
+          body: "Short.",
+          recommendation: "Advice belonging to the short body."
+        })
+      ]
+    }),
+    run("security", { findings: [withoutKey] })
+  ]);
+
+  const [entry] = merged.findings;
+  assert.match(entry.body, /considerably longer/);
+  assert.equal(entry.recommendation, "", "an absent key is not advice to borrow");
+  assert.deepEqual(entry.alternate_recommendations, ["Advice belonging to the short body."]);
+});
+
+test("surrounding whitespace does not duplicate text into the alternates", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings",
+          body: "  A padded explanation that wins on length.  ",
+          recommendation: "  Padded advice.  "
+        })
+      ]
+    }),
+    run("security", {
+      findings: [
+        finding({
+          severity: "high",
+          title: "Merge drops review findings silently",
+          body: "Short.",
+          recommendation: "Other advice.",
+          line_start: 11
+        })
+      ]
+    })
+  ]);
+
+  const [entry] = merged.findings;
+  assert.equal(entry.body, "A padded explanation that wins on length.");
+  assert.equal(entry.recommendation, "Padded advice.");
+  assert.ok(
+    !(entry.alternate_recommendations ?? []).includes("Padded advice."),
+    "the promoted advice must not also appear as an alternate"
+  );
+  assert.ok(
+    !(entry.alternate_bodies ?? []).includes("A padded explanation that wins on length."),
+    "the promoted body must not also appear as an alternate"
+  );
+});
+
+test("two lenses emitting the identical all-stopword title still merge", () => {
+  const { merged } = mergeLensReviews([
+    run("correctness", { findings: [finding({ title: "Potential issue", line_start: 10, line_end: 10 })] }),
+    run("resilience", { findings: [finding({ title: "Potential issue", line_start: 11, line_end: 11 })] })
+  ]);
+
+  assert.equal(merged.findings.length, 1);
+  assert.equal(merged.findings[0].lens_hits, 2);
+});

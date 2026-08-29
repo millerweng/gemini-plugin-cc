@@ -183,6 +183,13 @@ const MIN_SHARED_TITLE_WORDS = 2;
 const TITLE_OVERLAP_THRESHOLD = 0.4;
 
 function titlesLookRelated(left, right) {
+  // Identical titles are the same finding whatever they are made of. Without this, two
+  // lenses both emitting a title that is entirely stopwords — "To do", "Potential issue" —
+  // tokenize to nothing, hit the guard below, and surface as duplicates.
+  const leftText = typeof left === "string" ? left.trim().toLowerCase() : "";
+  const rightText = typeof right === "string" ? right.trim().toLowerCase() : "";
+  if (leftText && leftText === rightText) return true;
+
   const leftTokens = titleTokens(left);
   const rightTokens = titleTokens(right);
   // Bails before any of the size logic below. A title that is entirely stopwords tokenizes
@@ -302,12 +309,17 @@ function mergeFindingGroup(group) {
   // The body comes from `richest`, so the recommendation has to as well. Taking it from
   // `primary` instead paired one finding's detailed explanation with another finding's
   // advice, and the two could be about different aspects of the same code.
-  const primaryBody = richest.body ?? primary.body;
-  // `??`, not `||`. An empty recommendation from `richest` is that finding saying it has
-  // no advice, and falling through to `primary` on it would pair this body with another
-  // finding's advice — the pairing this binding exists to prevent. Nothing is lost:
-  // `primary`'s advice still appears among the alternates below.
-  const primaryRecommendation = richest.recommendation ?? primary.recommendation ?? "";
+  // One finding supplies both fields. Resolving them independently — even with `??` —
+  // still paired `richest`'s body with `primary`'s advice whenever the model omitted the
+  // recommendation key, which is the pairing this binding exists to prevent. Choosing the
+  // source object once makes the two impossible to separate. Nothing is lost: the other
+  // finding's advice still appears among the alternates below.
+  const source = richest.body ? richest : primary;
+  // Trimmed here because `uniqueText` trims too, and the alternates are filtered by
+  // comparing against these values. Untrimmed, text that differs only by surrounding
+  // whitespace failed that comparison and was printed a second time as an alternate.
+  const primaryBody = String(source.body ?? "").trim();
+  const primaryRecommendation = String(source.recommendation ?? "").trim();
   const recommendations = uniqueText([
     primaryRecommendation,
     ...sorted.map((entry) => entry.finding.recommendation)

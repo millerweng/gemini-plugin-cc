@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.3
+
+- A merged finding takes its body and its recommendation from one chosen finding, rather
+  than resolving each field separately. `??` respected an empty string but still fell
+  through on a missing key, so a model that omitted `recommendation` produced the same
+  mismatched pairing 1.4.1 and 1.4.2 each tried to close.
+- The promoted body and recommendation are trimmed before the alternates are filtered
+  against them. The alternates come from `uniqueText`, which trims, so text differing only
+  by surrounding whitespace failed the comparison and was printed twice.
+- Two lenses emitting the identical title merge even when that title is entirely
+  stopwords. The guard that stops a vague title from swallowing specific ones was also
+  stopping an exact match from merging with itself.
+
 ## 1.4.2
 
 - An empty recommendation on the finding that supplied the body is respected instead of
