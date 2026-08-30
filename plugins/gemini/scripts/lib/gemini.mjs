@@ -389,6 +389,44 @@ function buildTurnInput(prompt) {
   return [{ type: "text", text: prompt }];
 }
 
+/**
+ * Explain why a turn produced no final message.
+ *
+ * `stopReason` is the only field that says why, and it was being collected and then
+ * dropped: the payload carried `{status, stderr, stdout}` and the error text sent readers
+ * to the job stderr, which under the ACP transport is empty in exactly this case. Eight
+ * failures in one workspace reported `status: 1` with nothing anywhere to explain it.
+ */
+export function describeTurnFailure(result) {
+  const errorMessage = result?.error?.message;
+  if (typeof errorMessage === "string" && errorMessage.trim()) return errorMessage.trim();
+
+  const reason = result?.stopReason;
+  if (typeof reason === "string" && reason && reason !== "end_turn") {
+    switch (reason) {
+      case "max_tokens":
+        return (
+          "Gemini reached its output token limit before writing a final message — the budget " +
+          "went to reasoning. Shorten the prompt, narrow the review scope with --base or " +
+          "--scope, or split the request."
+        );
+      case "max_turn_requests":
+        return "Gemini reached its tool-call limit for a single turn before writing a final message.";
+      case "refusal":
+        return "Gemini declined this prompt and returned no final message.";
+      case "cancelled":
+        return "The turn was cancelled before Gemini wrote a final message.";
+      default:
+        return `Gemini ended the turn with stopReason "${reason}" and no final message.`;
+    }
+  }
+
+  const stderr = typeof result?.stderr === "string" ? result.stderr.trim() : "";
+  if (stderr) return stderr;
+
+  return null;
+}
+
 function buildResultStatus(turnState) {
   if (turnState.stopReason !== "end_turn") return 1;
   const message = turnState.lastAgentMessage;
@@ -865,8 +903,8 @@ export function parseStructuredOutput(rawOutput, fallback = {}) {
       ...fallback,
       parsed: null,
       parseError:
-        failureMessage ??
-        "Gemini exited without a final message. Nothing was returned to parse — check the job stderr for why the turn ended.",
+        failureMessage ||
+        "Gemini ended the turn without a final message and reported no reason for it.",
       rawOutput: rawOutput ?? ""
     };
   }

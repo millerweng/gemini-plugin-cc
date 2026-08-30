@@ -15,6 +15,7 @@ import {
   getGeminiAvailability,
   getSessionRuntimeStatus,
   interruptAcpTurn,
+  describeTurnFailure,
   parseStructuredOutput,
   readOutputSchema,
   runAcpReview,
@@ -444,7 +445,7 @@ async function runReviewPass(context, request, reviewName, focusText, lens) {
   });
   const parsed = parseStructuredOutput(result.finalMessage, {
     status: result.status,
-    failureMessage: result.error?.message ?? result.stderr
+    failureMessage: describeTurnFailure(result)
   });
   return { result, parsed };
 }
@@ -483,6 +484,9 @@ async function executeReviewRun(request) {
     },
     gemini: {
       status: result.status,
+      // The only field that says why a turn ended without a final message. It used to be
+      // returned by runAcpTurn and then dropped here.
+      stopReason: result.stopReason ?? null,
       stderr: result.stderr,
       stdout: result.finalMessage,
       reasoning: result.reasoningSummary
@@ -501,6 +505,7 @@ async function executeReviewRun(request) {
     rendered: renderReviewResult(parsed, {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
+      stopReason: result.stopReason ?? null,
       reasoningSummary: result.reasoningSummary,
       showReasoning: Boolean(request.showReasoning),
       inputMode: context.inputMode,
@@ -535,6 +540,7 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
         lens: lensId,
         label: lens?.label ?? lensId,
         status: result.status,
+        stopReason: result.stopReason ?? null,
         threadId: result.threadId,
         parsed: parsed.parsed,
         parseError: parsed.parseError,
@@ -596,6 +602,7 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
   const detailedLensRuns = lensRuns.map((run, index) => ({
     ...run,
     threadId: runs[index]?.threadId ?? null,
+    stopReason: runs[index]?.stopReason ?? null,
     // Kept for every pass, not just a total failure. A lens that returned unparseable
     // JSON is exactly the one whose raw text is needed to tell a token limit from a
     // refusal from markdown bleed.
@@ -618,6 +625,7 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       // downstream retry that the network failed when the model just broke format.
       // `exitStatus` below is a different question and keeps `||`.
       status: allFailed ? (runs[0]?.status ?? 1) : 0,
+      stopReason: runs.map((run) => run.stopReason ?? null),
       stderr: runs.map((run) => run.stderr).filter(Boolean).join("\n"),
       stdout: null,
       reasoning: combinedReasoning
@@ -716,7 +724,7 @@ async function executeTaskRun(request) {
   });
 
   const rawOutput = typeof result.finalMessage === "string" ? result.finalMessage : "";
-  const failureMessage = result.error?.message ?? result.stderr ?? "";
+  const failureMessage = describeTurnFailure(result) ?? "";
   const rendered = renderTaskResult(
     {
       rawOutput,
@@ -731,6 +739,7 @@ async function executeTaskRun(request) {
   );
   const payload = {
     status: result.status,
+    stopReason: result.stopReason ?? null,
     threadId: result.threadId,
     rawOutput,
     touchedFiles: result.touchedFiles,

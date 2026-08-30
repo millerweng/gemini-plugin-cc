@@ -325,6 +325,13 @@ export function renderReviewResult(parsedResult, meta) {
       `- Parse error: ${reason}`
     ];
 
+    // Says why the turn ended. Without it a run that stopped at its token limit and one
+    // that returned malformed JSON print the same thing, and only the second is about
+    // output format — readers chased the wrong problem.
+    if (typeof meta.stopReason === "string" && meta.stopReason && meta.stopReason !== "end_turn") {
+      lines.push(`- Stop reason: ${meta.stopReason}`);
+    }
+
     if (Array.isArray(meta.lensRuns) && meta.lensRuns.length > 0) {
       lines.push(
         "",
@@ -377,7 +384,14 @@ export function renderReviewResult(parsedResult, meta) {
 
   if (Array.isArray(meta.lensRuns) && meta.lensRuns.length > 0) {
     const passes = meta.lensRuns
-      .map((run) => (run.ok ? `${run.lens} (${run.findingCount})` : `${run.lens} — failed`))
+      .map((run) => {
+        if (run.ok) return `${run.lens} (${run.findingCount})`;
+        const why =
+          typeof run.stopReason === "string" && run.stopReason && run.stopReason !== "end_turn"
+            ? `failed: ${run.stopReason}`
+            : "failed";
+        return `${run.lens} — ${why}`;
+      })
       .join(", ");
     lines.push(`Lenses: ${passes}`, "");
     const failed = meta.lensRuns.filter((run) => !run.ok);

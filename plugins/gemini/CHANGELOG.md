@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.4
+
+- A turn that ends without a final message now says why. `stopReason` is the only field
+  that carries the answer, and it was collected by `runAcpTurn` and then dropped when the
+  payload was assembled — which left `status: 1` with an empty stderr, an empty stdout,
+  and nothing anywhere to explain either. Reported from a workspace where eight of forty
+  runs failed this way, every one of them inside a 28–44 second band while successful runs
+  reached 426 seconds.
+- The error text no longer sends readers to the job stderr. Under the ACP transport that
+  stderr is empty in exactly this case, so the one instruction the message gave led
+  nowhere. Each abnormal stop reason gets its own explanation instead; `max_tokens` says
+  the budget went to reasoning and suggests narrowing the scope.
+- `stopReason` is in the payload for reviews, tasks, and every lens of a multi-lens run,
+  and a failed lens shows it on the `Lenses:` line.
+- "did not return valid structured JSON" was misleading for these runs. Nothing was
+  malformed — nothing was returned at all, which is a different problem with a different
+  fix, and the wording sent people to look at output format.
+
 ## 1.4.3
 
 - A merged finding takes its body and its recommendation from one chosen finding, rather
