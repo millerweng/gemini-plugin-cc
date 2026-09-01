@@ -119,3 +119,33 @@ test("setup command can offer Gemini install and toggle review gate", () => {
   assert.match(setup, /AskUserQuestion/);
   assert.match(setup, /gemini-companion\.mjs" setup/);
 });
+
+// The two review commands are the only ones a natural-language request should be able to
+// start: the user says "gemini review" and it runs. Every other command is a deterministic
+// runtime entrypoint the model must not fire on its own.
+test("the review commands are model-invocable and name their trigger words", () => {
+  for (const name of ["review.md", "adversarial-review.md"]) {
+    const source = read(`commands/${name}`);
+    assert.ok(
+      !/disable-model-invocation/.test(source),
+      `${name} must stay model-invocable or the trigger words do nothing`
+    );
+    assert.match(source, /description:.*gemini/i);
+    assert.match(source, /Never start one unprompted/);
+  }
+
+  const review = read("commands/review.md");
+  const adversarial = read("commands/adversarial-review.md");
+  assert.match(review, /"gemini review"/);
+  assert.match(adversarial, /"gemini adversarial-review"/);
+});
+
+test("the runtime entrypoints stay closed to model invocation", () => {
+  for (const name of ["status.md", "result.md", "cancel.md", "transfer.md"]) {
+    assert.match(
+      read(`commands/${name}`),
+      /disable-model-invocation:\s*true/,
+      `${name} must not be model-invocable`
+    );
+  }
+});

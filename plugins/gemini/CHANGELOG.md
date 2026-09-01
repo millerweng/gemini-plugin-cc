@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+
+- "gemini review" and "gemini adversarial-review" now start the review. Both commands
+  dropped `disable-model-invocation`, so Claude can run them from a plain request instead
+  of asking you to type the slash form. Their descriptions name the trigger words.
+- Both commands say when not to run: a bare "review this" is not enough on its own, and
+  neither is ever started unprompted — a review costs quota and minutes, and `--multi`
+  multiplies both by the number of lenses.
+- `status`, `result`, `cancel` and `transfer` stay closed to model invocation. They are
+  deterministic runtime entrypoints, and a test now pins both halves of that split.
+
 ## 1.4.4
 
 - A turn that ends without a final message now says why. `stopReason` is the only field

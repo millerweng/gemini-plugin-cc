@@ -1,11 +1,17 @@
 ---
-description: Run a Gemini review that challenges the implementation approach and design choices
+description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
 argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [focus ...]'
-disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 
 Run an adversarial Gemini review through the shared plugin runtime.
+
+When to run this:
+- The user named Gemini, or asked for an adversarial or challenge review. A bare
+  "review this" is `/gemini:review`, not this one.
+- Never start one unprompted. A review spends Gemini quota and takes minutes, and
+  `--multi` multiplies both by the number of lenses.
+
 Position it as a challenge review that questions the chosen implementation, design choices, tradeoffs, and assumptions.
 It is not just a stricter pass over implementation defects.
 

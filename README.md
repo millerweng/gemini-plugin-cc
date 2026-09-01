@@ -152,6 +152,11 @@ read-only planning run.
 
 ### `/gemini:review`
 
+Say "gemini review" and Claude runs this for you — the two review commands are the only
+ones it can start from a plain request. Every other command in this plugin needs the slash
+form. Claude will not start a review you did not ask for; one costs Gemini quota and
+minutes, and `--multi` multiplies both.
+
 Reads your working-tree diff or branch diff and asks Gemini to review it. Returns structured findings covering correctness, regression risk, and code quality. **Review-only -- never modifies code.**
 
 **Flags:**
