@@ -158,6 +158,65 @@ function inferLegacyJobPhase(job, progressPreview = []) {
   return job.jobClass === "review" ? "reviewing" : "running";
 }
 
+// A job file reads `running` until something writes a terminal status over it, and only
+// the run itself can do that. A worker killed by a signal, a laptop that slept, a Bash
+// call cut off mid-run — none of them get the chance, so the record stays `running`
+// forever and every report drawn from it looks healthy. `elapsed` makes that worse: it
+// counts from `startedAt` to now, so a dead job's clock keeps climbing exactly like a
+// live one's. Liveness therefore comes from two signals the record cannot fake: whether
+// the recorded pid still exists, and how long ago the job log last grew.
+export const DEFAULT_STALL_THRESHOLD_MS = 300000;
+
+function readLogMtimeMs(logFile) {
+  if (!logFile) {
+    return null;
+  }
+  try {
+    return fs.statSync(logFile).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// null means "no pid recorded", which is not the same as "dead" — a queued job has not
+// claimed one yet, and an older job record predates the field.
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the pid is taken by a process this user may not signal, so it is alive.
+    return error?.code === "EPERM";
+  }
+}
+
+function buildJobLiveness(job, options = {}) {
+  if (job.status !== "queued" && job.status !== "running") {
+    return { lastUpdate: null, lastUpdateAgeMs: null, processAlive: null, stalled: false };
+  }
+
+  // Gemini streams its reasoning, and every chunk appends a log line, so the log file's
+  // mtime tracks the run far more closely than `updatedAt` — that one is only stamped
+  // when the phase changes, which a long single-phase review never does.
+  const recordedMs = Date.parse(job.updatedAt ?? job.startedAt ?? job.createdAt ?? "");
+  const candidates = [readLogMtimeMs(job.logFile), Number.isFinite(recordedMs) ? recordedMs : null].filter(
+    (value) => value !== null
+  );
+  const lastUpdateMs = candidates.length > 0 ? Math.max(...candidates) : null;
+  const lastUpdateAgeMs = lastUpdateMs === null ? null : Math.max(0, Date.now() - lastUpdateMs);
+  const stallThresholdMs = options.stallThresholdMs ?? DEFAULT_STALL_THRESHOLD_MS;
+
+  return {
+    lastUpdate: lastUpdateMs === null ? null : formatElapsedDuration(new Date(lastUpdateMs).toISOString()),
+    lastUpdateAgeMs,
+    processAlive: isProcessAlive(job.pid),
+    stalled: lastUpdateAgeMs !== null && lastUpdateAgeMs >= stallThresholdMs
+  };
+}
+
 export function enrichJob(job, options = {}) {
   const maxProgressLines = options.maxProgressLines ?? DEFAULT_MAX_PROGRESS_LINES;
   const enriched = {
@@ -176,6 +235,7 @@ export function enrichJob(job, options = {}) {
 
   return {
     ...enriched,
+    ...buildJobLiveness(job, options),
     phase: enriched.phase ?? inferLegacyJobPhase(enriched, enriched.progressPreview)
   };
 }

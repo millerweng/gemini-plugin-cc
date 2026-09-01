@@ -43,7 +43,7 @@
 | `/gemini:rescue` | 把调查、诊断或修复交给 Gemini |
 | `/gemini:transfer` | 把当前会话转成可 resume 的 Gemini 会话 |
 | `/gemini:setup` | 检查环境、开关审查门、固定 review base |
-| `/gemini:status` | 查看进行中和最近的任务 |
+| `/gemini:status` | 查看进行中和最近的任务，以及每个运行中的任务是否还活着 |
 | `/gemini:result` | 查看已完成任务的输出 |
 | `/gemini:cancel` | 取消一个后台任务 |
 

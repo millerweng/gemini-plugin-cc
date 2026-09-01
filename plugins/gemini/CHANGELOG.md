@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.6.0
+
+- `status` now says whether a run is alive. A job record reads `running` until something
+  writes a terminal status over it, and a worker killed by a signal never gets to — so a
+  dead job stayed `running` forever while `elapsed` kept climbing exactly like a live
+  one's. Liveness comes from two signals the record cannot fake: whether the recorded pid
+  still exists, and how long ago the job log last grew. The active jobs table carries a
+  `Liveness` column, and the details block spells it out.
+- The log's mtime is the heartbeat, not `updatedAt`. Gemini streams its reasoning and
+  every chunk appends a log line, while `updatedAt` is only stamped when the phase
+  changes — which a long single-phase review never does. The stall threshold is five
+  minutes because the final answer streams through `agent_message_chunk`, which emits no
+  progress event, so a healthy run can go quiet for a few minutes near the end.
+- A `running` job whose process is gone is reported as dead rather than stuck. The pid was
+  already recorded by `runTrackedJob` for every job, foreground included, and nothing had
+  ever read it back.
+- Reviews no longer present partial coverage as a clean verdict. The companion has always
+  printed a `Warning:` line when the diff was truncated, the base was auto-detected over a
+  wide range, or a lens produced nothing — but `/gemini:review` was told to return stdout
+  verbatim and add no commentary, so the warning sat above three tidy sections and read as
+  complete. Both review commands and `/gemini:result` now name the limit in a sentence of
+  their own before the output.
+- Both review commands size the diff in bytes before running. Past roughly 256 KB the
+  companion sends a partial diff, and generated or copied files — an installed plugin copy
+  under `.claude`, build output, a lockfile — push a small change over that line. The
+  scope check offers a narrower `--base` instead of spending the run.
+- A long delegation no longer degrades into "never ran". A `Bash` call gets 600 seconds;
+  past that Claude Code moves it to the background and hands back a timeout notice, and
+  the rescue subagent ends the moment it returns — it cannot wait, though it used to say
+  it would. It now picks `task --background` for long work, which spawns a detached worker
+  and returns a job id in seconds, and reports an unfinished run as unfinished.
+- Callers confirm before treating delegated work as done. A returned subagent is not a
+  finished Gemini run; `/gemini:rescue` and both review commands wait on
+  `status --wait` in a background call, which has no 600-second ceiling, and read the
+  `Liveness:` line before waiting again.
+- `gemini-cli-runtime` told the rescue subagent to "return nothing" when a Bash call
+  failed, contradicting both the agent definition and `gemini-result-handling`. Silence
+  reads as success to the caller; it now returns stdout, stderr, and the exit code.
+
 ## 1.5.0
 
 - "gemini review" and "gemini adversarial-review" now start the review. Both commands

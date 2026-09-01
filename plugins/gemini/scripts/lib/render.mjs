@@ -154,17 +154,33 @@ function formatGeminiResumeCommand(job) {
   return `gemini --resume ${job.threadId}`;
 }
 
+// `Status` and `Elapsed` both look identical for a run that is working and one that
+// died half an hour ago, so the table carries its own liveness cell rather than making
+// a reader scroll to the details block for the one field that separates them.
+function formatLivenessCell(job) {
+  if (job.processAlive === false) {
+    return "dead — process gone";
+  }
+  if (job.stalled) {
+    return `no log activity for ${job.lastUpdate}`;
+  }
+  if (job.lastUpdate) {
+    return `alive — log grew ${job.lastUpdate} ago`;
+  }
+  return "";
+}
+
 function appendActiveJobsTable(lines, jobs) {
   lines.push("Active jobs:");
-  lines.push("| Job | Kind | Status | Phase | Elapsed | Gemini Session ID | Summary | Actions |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Job | Kind | Status | Phase | Elapsed | Liveness | Gemini Session ID | Summary | Actions |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const job of jobs) {
     const actions = [`/gemini:status ${job.id}`];
     if (job.status === "queued" || job.status === "running") {
       actions.push(`/gemini:cancel ${job.id}`);
     }
     lines.push(
-      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(job.threadId ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
+      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(formatLivenessCell(job))} | ${escapeMarkdownCell(job.threadId ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
     );
   }
 }
@@ -179,6 +195,23 @@ function pushJobDetails(lines, job, options = {}) {
   }
   if (options.showElapsed && job.elapsed) {
     lines.push(`  Elapsed: ${job.elapsed}`);
+  }
+  // `Elapsed` climbs on its own and proves nothing. These two lines are the liveness
+  // report: how long since the run last did something, and whether its process is still
+  // there. Both only appear while the job claims to be active.
+  if (options.showElapsed && job.lastUpdate) {
+    lines.push(`  Last update: ${job.lastUpdate} ago`);
+  }
+  if (options.showElapsed && job.processAlive === false) {
+    lines.push(
+      `  Liveness: the recorded process is gone while the job still reads ${job.status}, so it died without writing a result. Treat the run as dead and start it again.`
+    );
+  } else if (options.showElapsed && job.stalled) {
+    lines.push(
+      `  Liveness: nothing new in the log for ${job.lastUpdate}, so the run may be stuck. Check the log below, and cancel it if it stays silent.`
+    );
+  } else if (options.showElapsed && job.lastUpdate) {
+    lines.push("  Liveness: the log is still growing, so Gemini is working.");
   }
   if (options.showDuration && job.duration) {
     lines.push(`  Duration: ${job.duration}`);

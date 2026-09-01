@@ -49,7 +49,13 @@ Safety rules:
 - Preserve the user's task text as-is apart from stripping routing flags.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Return the stdout of the `task` command exactly as-is.
-- If the Bash call fails or Gemini cannot be invoked, return nothing.
+- If the Bash call fails or Gemini cannot be invoked, return the stdout, the stderr, and the exit code verbatim. Silence reads as success to the caller and is never a valid answer.
+
+Long runs:
+- A `Bash` call gets 600 seconds. Past that Claude Code moves the command to the background and hands this subagent a timeout notice in place of the result.
+- This subagent cannot wait for that. Returning ends it, so there is no later turn in which to collect the output. State the run is unfinished rather than promising a later report.
+- Choose `task --background` for anything open-ended, multi-step, or plausibly longer than a few minutes. The companion spawns a detached worker and returns a job id in seconds, so the run outlives this subagent.
+- When a foreground call does time out, report exactly that: the run is unfinished, the job id if the notice or the launch line carries one, and `/gemini:status` as the way to collect it. A timeout notice is not a result.
 
 ACP stability note:
 - The Gemini ACP surface exposes methods like `session/new`, `session/prompt`, `session/cancel`, and `session/unstable_setSessionModel`. The `unstable_` prefix signals the method name may change. If ACP calls start failing with method-not-found errors, edit the method-name table at the top of `lib/acp-client.mjs` rather than rewriting the broker.

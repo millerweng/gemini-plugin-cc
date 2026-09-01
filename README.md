@@ -44,7 +44,7 @@ to do, check that the marketplace advertises a higher version than
 | `/gemini:rescue` | Delegate investigation, diagnosis, or a fix |
 | `/gemini:transfer` | Carry this session into a resumable Gemini session |
 | `/gemini:setup` | Check readiness, toggle the review gate, pin the review base |
-| `/gemini:status` | Active and recent jobs |
+| `/gemini:status` | Active and recent jobs, and whether each running one is still alive |
 | `/gemini:result` | Stored output of a finished job |
 | `/gemini:cancel` | Cancel an active background job |
 

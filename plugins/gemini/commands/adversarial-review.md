@@ -1,7 +1,7 @@
 ---
 description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
 argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [focus ...]'
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(wc:*), AskUserQuestion
 ---
 
 Run an adversarial Gemini review through the shared plugin runtime.
@@ -24,6 +24,12 @@ Core constraint:
 - Your only job is to run the review and return Gemini's output verbatim to the user.
 - Keep the framing focused on whether the current approach is the right one, what assumptions it depends on, and where the design could fail under real-world conditions.
 
+Scope check (do this before the execution mode rules):
+- Measure the diff in bytes: `git diff --binary <base>...HEAD | wc -c` for a branch review, `git diff --binary HEAD | wc -c` for a working tree.
+- Past roughly 256 KB the companion sends a partial diff, and the files that do not fit go unreviewed.
+- Generated and copied files are the usual cause while the real change stays small — an installed plugin copy under `.claude`, build output, a lockfile. `git diff --stat` names them.
+- When the diff is over that limit, the review needs a narrower scope. Carry that into the `AskUserQuestion` below as a third, recommended option: rerun with a tighter `--base <ref>`. Name the heaviest paths in the question so the choice is informed.
+
 Execution mode rules:
 - If the raw arguments include `--wait`, do not ask. Run in the foreground.
 - If the raw arguments include `--background`, do not ask. Run in a Claude background task.
@@ -36,7 +42,7 @@ Execution mode rules:
   - Recommend waiting only when the scoped review is clearly tiny, roughly 1-2 files total and no sign of a broader directory-sized change.
   - In every other case, including unclear size, recommend background.
   - When in doubt, run the review instead of declaring that there is nothing to review.
-- Then use `AskUserQuestion` exactly once with two options, putting the recommended option first and suffixing its label with `(Recommended)`:
+- Then use `AskUserQuestion` exactly once, with the two options below plus the narrower-scope option when the scope check called for it. Put the recommended option first and suffix its label with `(Recommended)`:
   - `Wait for results`
   - `Run in background`
 
@@ -57,13 +63,26 @@ Multi-lens review (`--multi`):
 - The passes run one after another, so a `--multi` review takes roughly as many times longer as it has lenses. Recommend `--background` whenever `--multi` is used, regardless of diff size.
 - Pass `--multi` through to the companion script untouched.
 
+Coverage reporting:
+- The companion prints `Warning:` lines above the findings whenever the run covered less than the whole change. Read them before presenting anything.
+- `the diff was too large to send in full ... so it was truncated` — Gemini saw only part of the diff, and every path under `Files Not Included` went unreviewed.
+- `base ... was auto-detected and the range covers N files` — the range may be wider than the change the user meant.
+- `N of M lenses produced no usable result` — those lenses contributed nothing to the findings.
+- When any of these appear, open with one sentence of your own naming the limit and what it leaves uncovered, then give the verbatim output. Presenting a partial review as a clean verdict is the failure this rule prevents.
+- Then offer a narrower rerun: a tighter `--base <ref>`, or `--scope working-tree` when only the uncommitted change matters.
+- With no `Warning:` line, return the output verbatim and add nothing.
+
 Foreground flow:
 - Run:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" adversarial-review "$ARGUMENTS"
 ```
 - Return the command stdout verbatim, exactly as-is.
-- Do not paraphrase, summarize, or add commentary before or after it.
+- Add nothing around it beyond the coverage sentence described above.
+- A `Bash` call gets 600 seconds. If the review outruns that and Claude Code moves it to the background, there is no verdict and no findings yet — the review is unfinished, and a timeout notice is not a review.
+- Wait it out with `node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" status <job-id> --wait --timeout-ms 3600000`, launched with `run_in_background: true`. A background call has no 600-second ceiling, and the harness re-invokes you when the wait exits. Drop the job id to wait on the one active job in this session.
+- If that report still shows `queued` or `running`, read its `Liveness:` line before waiting again. `the log is still growing` means Gemini is working, so wait. `nothing new in the log for <time>` means it may be stuck. `the recorded process is gone` means it died without recording a result — report that and stop waiting.
+- Otherwise present the result under the coverage rules above.
 - Do not fix any issues mentioned in the review output.
 
 Background flow:
@@ -77,3 +96,4 @@ Bash({
 ```
 - Do not call `BashOutput` or wait for completion in this turn.
 - After launching the command, tell the user: "Gemini adversarial review started in the background. Check `/gemini:status` for progress."
+- The coverage reporting rules apply to the stored result too, whenever it is collected.

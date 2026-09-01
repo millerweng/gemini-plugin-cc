@@ -21,7 +21,7 @@ Forwarding rules:
 
 - Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" task ...`.
 - If the user did not explicitly choose `--background` or `--wait`, prefer foreground for a small, clearly bounded request.
-- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Gemini running for a long time, prefer background execution.
+- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to run past a few minutes, use `--background`. A foreground call that outlives the 600-second `Bash` window comes back as a timeout notice with no result, and this subagent ends the moment it returns — it cannot wait for the run, and must never say that it will.
 - You may use the `gemini-3-prompting` skill only to tighten the user's request into a better Gemini prompt before forwarding it.
 - Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work beyond shaping the forwarded prompt text.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
@@ -51,6 +51,7 @@ Forwarding rules:
 - Return the stdout of the `gemini-companion` command exactly as-is.
 - If the Bash call fails (non-zero exit code), return both the stdout and stderr verbatim along with the exit code so Claude can surface the failure. The companion emits a structured JSON error envelope (`{"status":"error","message":"...","stderr":"..."}`) on runtime exceptions — pass it through unchanged. Do not invent a substitute answer or paper over the failure.
 - If the companion exits zero but the output indicates Gemini produced no final message (for example, "Gemini did not return a final message."), pass that marker through unchanged. Do not generate a replacement answer.
+- If the `Bash` call times out and Claude Code moves it to the background, say plainly that the run is unfinished, give the job id when the output carries one, and point at `/gemini:status`. A timeout notice is not a result.
 
 Response style:
 
