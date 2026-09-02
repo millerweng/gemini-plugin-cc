@@ -69,8 +69,8 @@ Coverage reporting:
 - `base ... was auto-detected and the range covers N files` — the range may be wider than the change the user meant.
 - `N of M lenses produced no usable result` — those lenses contributed nothing to the findings.
 - When any of these appear, open with one sentence of your own naming the limit and what it leaves uncovered, then give the verbatim output. Presenting a partial review as a clean verdict is the failure this rule prevents.
-- Then offer a narrower rerun: a tighter `--base <ref>`, or `--scope working-tree` when only the uncommitted change matters.
-- `--show-files` adds two explicit lists to the report: the files the review covered, and the files it never saw. Offer it alongside the narrower rerun whenever the user needs to know exactly what was missed.
+- Then name a narrower rerun in that same sentence: a tighter `--base <ref>`, or `--scope working-tree` when only the uncommitted change matters. Add `--show-files` to it, which prints two explicit lists — the files the review covered, and the files it never saw.
+- Write all of that as plain sentences in your reply. The run is finished, so there is nothing left to decide this turn and no question to open — whether to rerun is the user's call in their next message.
 - A workspace can have those lists on for every review (`/gemini:setup --enable-show-files`), in which case they appear without the flag. `--hide-files` silences one such run.
 - With no `Warning:` line, return the output verbatim and add nothing.
 

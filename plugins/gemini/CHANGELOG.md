@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1
+
+- Coverage reporting says what to do about a partial review in plain sentences, and says
+  the run is over so there is nothing to ask. "Offer a narrower rerun" sat a few lines
+  below the command's one `AskUserQuestion` rule, which was close enough to read as
+  permission to open a second prompt — and being asked "do you want the file names?" after
+  the review already finished is a question with nothing behind it.
+
 ## 1.8.0
 
 - `/gemini:setup --enable-show-files` makes covered-file lists the default for a workspace,
