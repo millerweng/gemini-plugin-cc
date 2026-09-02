@@ -30,13 +30,20 @@ import {
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
   collectReviewContext,
+  DEFAULT_INLINE_DIFF_MAX_BYTES,
   detectDefaultBranch,
   ensureGitRepository,
   resolveReviewTarget
 } from "./lib/git.mjs";
 import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
-import { resolveConfiguredReviewBase, resolveShowReviewFiles } from "./lib/review-config.mjs";
+import {
+  formatDiffByteBudget,
+  parseDiffByteBudget,
+  resolveConfiguredReviewBase,
+  resolveMaxInlineDiffBytes,
+  resolveShowReviewFiles
+} from "./lib/review-config.mjs";
 import { buildLensDirective, getLens, mergeLensReviews, resolveLensIds } from "./lib/review-lenses.mjs";
 import {
   generateJobId,
@@ -101,8 +108,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [focus text]",
-      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [focus text]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <n|512kb|1mb>] [focus text]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <n|512kb|1mb>] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
@@ -198,6 +205,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const config = getConfig(workspaceRoot);
   const reviewBase = resolveConfiguredReviewBase(cwd, workspaceRoot);
   const showReviewFiles = resolveShowReviewFiles(cwd, workspaceRoot);
+  const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -226,6 +234,10 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     showReviewFiles: showReviewFiles.enabled,
     showReviewFilesSource: showReviewFiles.source,
     showReviewFilesInheritedFrom: showReviewFiles.inheritedFrom,
+    maxInlineDiffBytes: diffBudget.bytes,
+    maxInlineDiffBytesLabel: formatDiffByteBudget(diffBudget.bytes),
+    maxInlineDiffBytesSource: diffBudget.source,
+    maxInlineDiffBytesInheritedFrom: diffBudget.inheritedFrom,
     // Where settings land depends on CLAUDE_PLUGIN_DATA, which Claude Code sets and a
     // plain shell does not. Running this command by hand writes to the temp fallback
     // instead, and the plugin then never reads it back — so name the file.
@@ -290,6 +302,25 @@ function buildSetupInitPrompts(cwd, report) {
       ]
     },
     {
+      key: "maxInlineDiffBytes",
+      header: "Diff budget",
+      question: "How much diff should a review send before it starts truncating?",
+      current: report.maxInlineDiffBytesLabel,
+      freeText: "Any size, such as `512kb` or `1mb`. Applies as `--set-max-diff-bytes <size>`.",
+      options: [
+        {
+          label: `${formatDiffByteBudget(DEFAULT_INLINE_DIFF_MAX_BYTES)} (default)`,
+          description: "Conservative. A larger prompt can spend the whole turn on reasoning and return nothing.",
+          apply: "--clear-max-diff-bytes"
+        },
+        {
+          label: formatDiffByteBudget(2 * DEFAULT_INLINE_DIFF_MAX_BYTES),
+          description: "Covers a bigger change in one pass. Truncation still reports what it left out.",
+          apply: `--set-max-diff-bytes ${2 * DEFAULT_INLINE_DIFF_MAX_BYTES}`
+        }
+      ]
+    },
+    {
       key: "reviewGate",
       header: "Review gate",
       question: "Should Claude be blocked from stopping until Gemini has reviewed the work?",
@@ -312,7 +343,7 @@ function buildSetupInitPrompts(cwd, report) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "set-review-base"],
+    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes"],
     booleanOptions: [
       "json",
       "verify",
@@ -321,6 +352,7 @@ async function handleSetup(argv) {
       "clear-review-base",
       "enable-show-files",
       "disable-show-files",
+      "clear-max-diff-bytes",
       "init"
     ],
     // No free-text arguments here, so an unrecognised flag is a mistake, not content.
@@ -335,6 +367,9 @@ async function handleSetup(argv) {
   }
   if (options["enable-show-files"] && options["disable-show-files"]) {
     throw new Error("Choose either --enable-show-files or --disable-show-files.");
+  }
+  if (options["set-max-diff-bytes"] && options["clear-max-diff-bytes"]) {
+    throw new Error("Choose either --set-max-diff-bytes <n> or --clear-max-diff-bytes.");
   }
 
   const cwd = resolveCommandCwd(options);
@@ -365,6 +400,24 @@ async function handleSetup(argv) {
   } else if (options["clear-review-base"]) {
     setConfig(workspaceRoot, "reviewBase", null);
     actionsTaken.push(`Cleared the default review base for ${workspaceRoot}; auto-detection applies again.`);
+  }
+
+  if (options["set-max-diff-bytes"]) {
+    // parseDiffByteBudget throws on anything unusable, which is the point: a budget that
+    // silently fell back to the default would only surface as an unexplained truncation.
+    const bytes = parseDiffByteBudget(options["set-max-diff-bytes"]);
+    setConfig(workspaceRoot, "maxInlineDiffBytes", bytes);
+    actionsTaken.push(
+      `Reviews in ${workspaceRoot} now send up to ${formatDiffByteBudget(bytes)} of diff before truncating.` +
+        (bytes > 4 * DEFAULT_INLINE_DIFF_MAX_BYTES
+          ? " That is well past the default; a prompt this large can spend the whole turn on reasoning and return nothing."
+          : "")
+    );
+  } else if (options["clear-max-diff-bytes"]) {
+    setConfig(workspaceRoot, "maxInlineDiffBytes", null);
+    actionsTaken.push(
+      `Cleared the diff budget for ${workspaceRoot}; reviews truncate past ${formatDiffByteBudget(DEFAULT_INLINE_DIFF_MAX_BYTES)} again.`
+    );
   }
 
   if (options["enable-show-files"]) {
@@ -540,7 +593,9 @@ async function executeReviewRun(request) {
   const focusText = request.focusText?.trim() ?? "";
   const reviewName = request.reviewName ?? "Review";
 
-  const context = collectReviewContext(request.cwd, target);
+  const context = collectReviewContext(request.cwd, target, {
+    maxInlineDiffBytes: request.maxInlineDiffBytes
+  });
 
   const lensIds = Array.isArray(request.lensIds) && request.lensIds.length > 0 ? request.lensIds : null;
   if (lensIds) {
@@ -592,6 +647,9 @@ async function executeReviewRun(request) {
       showFiles: Boolean(request.showFiles),
       reviewedFiles: context.reviewedFiles,
       omittedFiles: context.omittedFiles,
+      maxInlineDiffBytes: context.maxInlineDiffBytes,
+      // Pre-formatted so render.mjs stays a pure formatting module with no imports.
+      maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
@@ -752,6 +810,9 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       showFiles: Boolean(request.showFiles),
       reviewedFiles: context.reviewedFiles,
       omittedFiles: context.omittedFiles,
+      maxInlineDiffBytes: context.maxInlineDiffBytes,
+      // Pre-formatted so render.mjs stays a pure formatting module with no imports.
+      maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
@@ -1045,7 +1106,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd"],
+    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes"],
     booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
@@ -1070,6 +1131,9 @@ async function handleReviewCommand(argv, config) {
   const showFiles = resolveShowReviewFiles(cwd, workspaceRoot, {
     showFilesFlag: Boolean(options["show-files"]),
     hideFilesFlag: Boolean(options["hide-files"])
+  });
+  const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot, {
+    flagValue: options["max-diff-bytes"]
   });
   const target = resolveReviewTarget(cwd, {
     base: options.base,
@@ -1100,6 +1164,7 @@ async function handleReviewCommand(argv, config) {
         reviewName: config.reviewName,
         showReasoning: Boolean(options["show-reasoning"]),
         showFiles: showFiles.enabled,
+        maxInlineDiffBytes: diffBudget.bytes,
         lensIds,
         onProgress: progress
       }),

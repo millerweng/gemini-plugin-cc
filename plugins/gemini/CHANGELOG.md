@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.0
+
+- The 256 KB diff budget is configurable. `--max-diff-bytes 512kb` raises it for one run,
+  `/gemini:setup --set-max-diff-bytes 512kb` raises it for the workspace, and
+  `--clear-max-diff-bytes` restores the default. Sizes take a suffix (`512kb`, `1mb`) or
+  raw bytes, and worktrees inherit the setting the way they inherit the review base.
+- A truncation warning names the budget it hit and how to raise it. "Too large to send in
+  full" said nothing about which limit that was, so the number to change was only findable
+  by reading `git.mjs`.
+- An unusable budget is rejected when it is set, not ignored later. A silently discarded
+  value looks like the flag worked and only surfaces as a review that truncated when it
+  should not have. A budget already stored in a hand-edited settings file still falls back
+  to the default instead, since that path runs on every review.
+- `--init` asks about the diff budget too.
+- A new test loads every `lib/` module on its own. Moving the budget constant introduced a
+  cycle between `git.mjs` and `review-config.mjs` that loaded cleanly from one side and
+  threw "Cannot access before initialization" from the other, so it depended on which
+  module the entry point reached first — importing the CLI only ever exercises one order.
+
 ## 1.8.1
 
 - Coverage reporting says what to do about a partial review in plain sentences, and says

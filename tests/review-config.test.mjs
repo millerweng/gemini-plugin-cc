@@ -5,7 +5,10 @@ import assert from "node:assert/strict";
 
 import { setConfig } from "../plugins/gemini/scripts/lib/state.mjs";
 import {
+  formatDiffByteBudget,
+  parseDiffByteBudget,
   resolveConfiguredReviewBase,
+  resolveMaxInlineDiffBytes,
   resolveShowReviewFiles
 } from "../plugins/gemini/scripts/lib/review-config.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
@@ -118,5 +121,84 @@ test("the review base uses the same inheritance rule", () => {
       base: "origin/experiment",
       inheritedFrom: null
     });
+  });
+});
+
+test("a diff budget accepts raw bytes and size suffixes", () => {
+  assert.equal(parseDiffByteBudget("262144"), 262144);
+  assert.equal(parseDiffByteBudget("512kb"), 512 * 1024);
+  assert.equal(parseDiffByteBudget("1mb"), 1024 * 1024);
+  assert.equal(parseDiffByteBudget("256K"), 256 * 1024);
+  assert.equal(parseDiffByteBudget(" 512 kb "), 512 * 1024);
+});
+
+// Falling back to the default here would look like the flag worked, and only show up
+// later as a review that truncated when the user thought it would not.
+test("an unusable diff budget is rejected rather than ignored", () => {
+  for (const bad of ["abc", "0", "-5", "", "1gb", "kb"]) {
+    assert.throws(() => parseDiffByteBudget(bad), /byte count|greater than zero/, `"${bad}" should throw`);
+  }
+});
+
+test("formatDiffByteBudget prefers the largest exact unit", () => {
+  assert.equal(formatDiffByteBudget(1024 * 1024), "1 MB");
+  assert.equal(formatDiffByteBudget(512 * 1024), "512 KB");
+  assert.equal(formatDiffByteBudget(600), "600 bytes");
+});
+
+test("the diff budget defaults to 256 KB", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("cfg-budget-default-");
+    initGitRepo(repo);
+    const resolved = resolveMaxInlineDiffBytes(repo, repo);
+    assert.equal(resolved.bytes, 256 * 1024);
+    assert.equal(resolved.source, "default");
+  });
+});
+
+test("the workspace setting raises the diff budget for every run", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("cfg-budget-set-");
+    initGitRepo(repo);
+    setConfig(repo, "maxInlineDiffBytes", 1024 * 1024);
+    const resolved = resolveMaxInlineDiffBytes(repo, repo);
+    assert.equal(resolved.bytes, 1024 * 1024);
+    assert.equal(resolved.source, "config");
+  });
+});
+
+test("--max-diff-bytes outranks the workspace setting", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("cfg-budget-flag-");
+    initGitRepo(repo);
+    setConfig(repo, "maxInlineDiffBytes", 1024 * 1024);
+    const resolved = resolveMaxInlineDiffBytes(repo, repo, { flagValue: "512kb" });
+    assert.equal(resolved.bytes, 512 * 1024);
+    assert.equal(resolved.source, "flag");
+  });
+});
+
+test("a worktree inherits the diff budget from the main checkout", () => {
+  withPluginData(() => {
+    const { main, linked } = makeRepoWithWorktree();
+    setConfig(main, "maxInlineDiffBytes", 2 * 1024 * 1024);
+    const resolved = resolveMaxInlineDiffBytes(linked, linked);
+    assert.equal(resolved.bytes, 2 * 1024 * 1024);
+    assert.equal(resolved.inheritedFrom, main);
+  });
+});
+
+// This one runs on every review, not only when the value is set, so a hand-edited
+// settings file must degrade to the default instead of breaking the command.
+test("a corrupt stored budget falls back to the default instead of throwing", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("cfg-budget-bad-");
+    initGitRepo(repo);
+    for (const bad of ["not-a-number", -1, 0]) {
+      setConfig(repo, "maxInlineDiffBytes", bad);
+      const resolved = resolveMaxInlineDiffBytes(repo, repo);
+      assert.equal(resolved.bytes, 256 * 1024, `stored ${JSON.stringify(bad)} should fall back`);
+      assert.equal(resolved.source, "default");
+    }
   });
 });

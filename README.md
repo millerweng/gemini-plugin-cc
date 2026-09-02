@@ -73,6 +73,7 @@ Both review commands take the same flags and accept focus text after them.
 | `--model <alias>` | Pick a model (see the aliases below) |
 | `--show-reasoning` | Include Gemini's reasoning trace |
 | `--show-files` | List the files the review actually covered, and any it did not |
+| `--max-diff-bytes <size>` | Raise the truncation budget for this run (`512kb`, `1mb`, or raw bytes) |
 | `--progress` | Stream progress lines even when output is captured |
 | `--wait` / `--background` | Foreground, or detach |
 
@@ -89,8 +90,11 @@ Without `--wait` or `--background`, Claude sizes the review and recommends one.
 An auto-detected base spanning more than 40 files is flagged, since that usually means the
 range is much wider than the change you meant to review.
 
-A diff over roughly 256 KB is sent in part, and the report says so. `--show-files` turns
-that warning into two explicit lists — what the review covered, and what it never saw.
+A diff over the budget is sent in part, and the report names the budget it hit.
+`--show-files` turns that warning into two explicit lists — what the review covered, and
+what it never saw. The budget is 256 KB by default; raise it per run with
+`--max-diff-bytes 512kb`, or for the workspace with
+`/gemini:setup --set-max-diff-bytes 512kb`.
 
 ### Multi-lens review
 
@@ -185,6 +189,18 @@ so a truncated run names what it missed without you remembering the flag:
 `--show-files` still turns it on for a single run, and `--hide-files` silences one run in a
 workspace where the setting is on. Worktrees inherit the setting the same way the review
 base does, and a worktree that turns it off stays off.
+
+**Raise the diff budget.** Past 256 KB a review sends a partial diff. Raise the ceiling
+when your changes routinely run larger:
+
+```bash
+/gemini:setup --set-max-diff-bytes 512kb   # --clear-max-diff-bytes to undo
+```
+
+Sizes take a suffix (`512kb`, `1mb`) or raw bytes, and an unusable value is rejected when
+you set it rather than ignored later. Raise it a step at a time: a much larger prompt can
+spend the whole turn on reasoning and return nothing, which is worse than a truncated
+review that says it was truncated.
 
 **Settings location.** Setup reports the file it wrote to. Settings live under
 `CLAUDE_PLUGIN_DATA`, which Claude Code sets and a plain shell does not, so running the

@@ -11,7 +11,12 @@ const MAX_AGGREGATE_UNTRACKED_BYTES = 128 * 1024;
 // damage: a diff well inside the byte budget was declared too large because it touched
 // one file too many. A 62-file review failed that way. Per-file scaffolding is part of
 // the diff, so it is already counted in bytes.
-const DEFAULT_INLINE_DIFF_MAX_BYTES = 256 * 1024;
+//
+// Exported so the `--max-diff-bytes` flag and the workspace setting that override it
+// resolve against the same number. It is declared here rather than in review-config.mjs
+// because that module imports this one, and pointing the dependency back would make the
+// pair a cycle whose failure depends on which side is imported first.
+export const DEFAULT_INLINE_DIFF_MAX_BYTES = 256 * 1024;
 
 // Git is directly executable on Windows. Repository-derived arguments must never pass through a shell.
 function git(cwd, args, options = {}) {
@@ -530,6 +535,9 @@ export function collectReviewContext(cwd, target, options = {}) {
     target,
     fileCount: details.changedFiles.length,
     diffBytes,
+    // The budget that produced this inputMode. The report names it so a truncated review
+    // says which limit it hit, not just that it hit one.
+    maxInlineDiffBytes,
     inputMode: includeDiff ? "inline-diff" : "truncated-diff",
     collectionGuidance: buildAdversarialCollectionGuidance({ includeDiff }),
     ...details,

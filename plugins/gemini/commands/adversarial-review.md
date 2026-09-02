@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
-argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(wc:*), AskUserQuestion
 ---
 
@@ -26,7 +26,8 @@ Core constraint:
 
 Scope check (do this before the execution mode rules):
 - Measure the diff in bytes: `git diff --binary <base>...HEAD | wc -c` for a branch review, `git diff --binary HEAD | wc -c` for a working tree.
-- Past roughly 256 KB the companion sends a partial diff, and the files that do not fit go unreviewed.
+- Past the diff budget the companion sends a partial diff, and the files that do not fit go unreviewed. The budget is 256 KB unless the workspace raised it; `/gemini:setup` reports the value in force.
+- Raising it is one of the two ways out, alongside a narrower range: `--max-diff-bytes 512kb` for this run, or `/gemini:setup --set-max-diff-bytes 512kb` for every run. A much larger prompt can spend the whole turn on reasoning and return nothing, so raise it a step at a time rather than to a round number that sounds safe.
 - Generated and copied files are the usual cause while the real change stays small — an installed plugin copy under `.claude`, build output, a lockfile. `git diff --stat` names them.
 - When the diff is over that limit, the review needs a narrower scope. Carry that into the `AskUserQuestion` below as a third, recommended option: rerun with a tighter `--base <ref>`. Name the heaviest paths in the question so the choice is informed.
 

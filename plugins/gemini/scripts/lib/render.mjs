@@ -279,6 +279,7 @@ export function renderSetupReport(report) {
     `- auth: ${report.auth.detail}${report.auth.verified === true ? " (verified)" : report.auth.verified === false ? " (verification failed)" : " (unverified)"}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
+    `- diff budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ""}${report.maxInlineDiffBytesInheritedFrom ? ` (inherited from ${report.maxInlineDiffBytesInheritedFrom})` : ""}`,
     `- review base: ${report.reviewBase ?? "auto-detected"}${report.reviewBaseInheritedFrom ? ` (inherited from ${report.reviewBaseInheritedFrom})` : ""}`,
     `- covered-file list in reports: ${report.showReviewFiles ? "on" : "off"}${report.showReviewFilesSource === "default" ? " (default)" : ""}${report.showReviewFilesInheritedFrom ? ` (inherited from ${report.showReviewFilesInheritedFrom})` : ""}`,
     ...(report.configFile ? [`- settings file: ${report.configFile}`] : []),
@@ -532,7 +533,7 @@ export function renderReviewResult(parsedResult, meta) {
       .filter(Boolean)
       .join(", ");
     lines.push(
-      `Warning: the diff was too large to send in full${scale ? ` (${scale})` : ""}, so it was truncated. Files listed under "Files Not Included" in the prompt were not reviewed at all.`,
+      `Warning: the diff was too large to send in full${scale ? ` (${scale})` : ""}, so it was truncated${meta.maxInlineDiffBytesLabel ? ` at the ${meta.maxInlineDiffBytesLabel} budget` : ""}. Files listed under "Files Not Included" in the prompt were not reviewed at all.${meta.maxInlineDiffBytesLabel ? " Raise it with `--max-diff-bytes <size>` or `/gemini:setup --set-max-diff-bytes <size>`, or narrow the range." : ""}`,
       ""
     );
   }

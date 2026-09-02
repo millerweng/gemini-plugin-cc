@@ -71,6 +71,7 @@
 | `--model <alias>` | 指定模型，别名见下面 |
 | `--show-reasoning` | 输出里带上 Gemini 的推理过程 |
 | `--show-files` | 列出这次 review 实际覆盖了哪些文件，以及哪些没覆盖到 |
+| `--max-diff-bytes <size>` | 只对这次抬高截断上限（`512kb`、`1mb`，或者直接给字节数）|
 | `--progress` | 输出被重定向时也打印进度行 |
 | `--wait` / `--background` | 前台跑，或者转后台 |
 
@@ -86,7 +87,11 @@
 
 自动检测出的 base 如果覆盖超过 40 个文件，输出里会标出来。这通常说明范围比你想 review 的改动大得多。
 
-diff 超过 256 KB 时只会发一部分，报告里会写明。加 `--show-files` 就把这句话变成两份明确的清单：这次看了哪些文件，哪些没看到。
+diff 超过预算时只会发一部分，报告里会写明撞的是哪个预算。
+加 `--show-files` 就把这句话变成两份明确的清单：这次看了哪些文件，哪些没看到。
+
+预算默认 256 KB。单次抬高用 `--max-diff-bytes 512kb`，
+整个 workspace 用 `/gemini:setup --set-max-diff-bytes 512kb`。
 
 ### 多路 review
 
@@ -170,6 +175,16 @@ ref 在设置时就解析，写错了当场报错。
 每个 git worktree 是独立的 workspace。worktree 自己没设 base，就继承主 checkout 的。
 
 固定的 base 只在做 branch review 时提供 ref。有未提交改动时，还是优先 review 未提交的部分。
+
+**抬高 diff 预算。** 超过 256 KB 的 review 只会发一部分 diff。改动经常更大的话可以调高：
+
+```bash
+/gemini:setup --set-max-diff-bytes 512kb   # 用 --clear-max-diff-bytes 撤销
+```
+
+可以写后缀（`512kb`、`1mb`），也可以直接给字节数。写错的值在设置时就报错，不会被悄悄忽略。
+
+一步一步往上调。prompt 大太多的话，可能整个 turn 都花在推理上、最后什么都不返回 —— 那比一次「明说自己截断了」的 review 更糟。
 
 **让 review 一直列出覆盖了哪些文件。** 在这个 workspace 里把 `--show-files` 设成常开，
 这样截断的时候不用你记得加参数，报告自己就会写明漏了什么：
