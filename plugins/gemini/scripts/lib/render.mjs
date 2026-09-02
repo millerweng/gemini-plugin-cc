@@ -342,6 +342,35 @@ function appendFailedLensOutput(lines, lensRuns) {
   }
 }
 
+// `--show-files` answers "what did this actually cover?" without making the reader infer
+// it from the diff stat. The reviewed list is the changed set minus whatever never
+// reached the prompt, so on a truncated run the two lists together account for every
+// changed file.
+function appendReviewedFilesSection(lines, meta) {
+  if (!meta.showFiles) {
+    return;
+  }
+
+  const reviewed = Array.isArray(meta.reviewedFiles) ? meta.reviewedFiles : [];
+  const omitted = Array.isArray(meta.omittedFiles) ? meta.omittedFiles : [];
+
+  lines.push("", `Files reviewed (${reviewed.length}):`);
+  if (reviewed.length === 0) {
+    lines.push("- (none — no file diff reached Gemini)");
+  } else {
+    for (const file of reviewed) {
+      lines.push(`- ${file}`);
+    }
+  }
+
+  if (omitted.length > 0) {
+    lines.push("", `Files NOT reviewed (${omitted.length}) — their content never reached Gemini:`);
+    for (const file of omitted) {
+      lines.push(`- ${file}`);
+    }
+  }
+}
+
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
     // An empty parseError renders as a bare label with nothing after it, which tells
@@ -380,6 +409,9 @@ export function renderReviewResult(parsedResult, meta) {
     }
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+    // A run that produced no usable review still consumed a specific set of files, and
+    // "what did it even look at?" is the first question after a failure.
+    appendReviewedFilesSection(lines, meta);
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -401,6 +433,9 @@ export function renderReviewResult(parsedResult, meta) {
     }
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+    // A run that produced no usable review still consumed a specific set of files, and
+    // "what did it even look at?" is the first question after a failure.
+    appendReviewedFilesSection(lines, meta);
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
@@ -534,6 +569,8 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push(`- ${step}`);
     }
   }
+
+  appendReviewedFilesSection(lines, meta);
 
   // On a review that parsed, the reasoning trace restates the findings at length and
   // costs tokens in whatever reads this. It stays available behind --show-reasoning,

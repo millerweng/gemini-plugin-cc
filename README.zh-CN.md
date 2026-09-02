@@ -70,6 +70,7 @@
 | `--multi[=<lens,...>]` | 分三路窄范围跑，再把 findings 合并 |
 | `--model <alias>` | 指定模型，别名见下面 |
 | `--show-reasoning` | 输出里带上 Gemini 的推理过程 |
+| `--show-files` | 列出这次 review 实际覆盖了哪些文件，以及哪些没覆盖到 |
 | `--progress` | 输出被重定向时也打印进度行 |
 | `--wait` / `--background` | 前台跑，或者转后台 |
 
@@ -84,6 +85,8 @@
 5. 和自动检测出的默认分支比 branch diff
 
 自动检测出的 base 如果覆盖超过 40 个文件，输出里会标出来。这通常说明范围比你想 review 的改动大得多。
+
+diff 超过 256 KB 时只会发一部分，报告里会写明。加 `--show-files` 就把这句话变成两份明确的清单：这次看了哪些文件，哪些没看到。
 
 ### 多路 review
 

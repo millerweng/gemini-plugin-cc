@@ -72,6 +72,7 @@ Both review commands take the same flags and accept focus text after them.
 | `--multi[=<lens,...>]` | Run three narrow passes instead of one and merge the findings |
 | `--model <alias>` | Pick a model (see the aliases below) |
 | `--show-reasoning` | Include Gemini's reasoning trace |
+| `--show-files` | List the files the review actually covered, and any it did not |
 | `--progress` | Stream progress lines even when output is captured |
 | `--wait` / `--background` | Foreground, or detach |
 
@@ -87,6 +88,9 @@ Without `--wait` or `--background`, Claude sizes the review and recommends one.
 
 An auto-detected base spanning more than 40 files is flagged, since that usually means the
 range is much wider than the change you meant to review.
+
+A diff over roughly 256 KB is sent in part, and the report says so. `--show-files` turns
+that warning into two explicit lists — what the review covered, and what it never saw.
 
 ### Multi-lens review
 

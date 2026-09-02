@@ -318,9 +318,14 @@ function formatUntrackedFile(cwd, relativePath) {
   return [`### ${relativePath}`, "```", buffer.toString("utf8").trimEnd(), "```"].join("\n");
 }
 
+// An untracked file reaches Gemini as its whole content, and three things can stop that:
+// a per-file skip (too big, binary, a directory, unreadable), or the aggregate budget
+// running out. A skip marker still names the file in the prompt, but its content is not
+// there — so for "was this reviewed?" it counts as omitted, exactly like a truncated one.
 function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
   const aggregateMax = options.maxAggregateUntrackedBytes ?? MAX_AGGREGATE_UNTRACKED_BYTES;
   const parts = [];
+  const omitted = [];
   let totalBytes = 0;
   let truncatedCount = 0;
   let truncatedRawBytes = 0;
@@ -331,6 +336,7 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
     const isSkipMarker = formatted.includes("(skipped:");
 
     if (!isSkipMarker && totalBytes + formattedBytes > aggregateMax) {
+      omitted.push(filePath);
       truncatedCount++;
       try {
         const stat = fs.statSync(path.join(cwd, filePath));
@@ -342,7 +348,9 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
     }
 
     parts.push(formatted);
-    if (!isSkipMarker) {
+    if (isSkipMarker) {
+      omitted.push(filePath);
+    } else {
       totalBytes += formattedBytes;
     }
   }
@@ -355,7 +363,7 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
     );
   }
 
-  return parts.join("\n\n");
+  return { body: parts.join("\n\n"), omitted };
 }
 
 function collectWorkingTreeContext(cwd, state, options = {}) {
@@ -364,20 +372,22 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
   const changedFiles = listUniqueFiles(state.staged, state.unstaged, state.untracked);
 
   let parts;
+  let omittedFiles;
   if (includeDiff) {
     const stagedDiff = gitChecked(cwd, ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
     const unstagedDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
-    const untrackedBody = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    omittedFiles = untracked.omitted;
     parts = [
       formatSection("Git Status", status),
       formatSection("Staged Diff", stagedDiff),
       formatSection("Unstaged Diff", unstagedDiff),
-      formatSection("Untracked Files", untrackedBody)
+      formatSection("Untracked Files", untracked.body)
     ];
   } else {
     const stagedStat = gitChecked(cwd, ["diff", "--shortstat", "--cached"]).stdout.trim();
     const unstagedStat = gitChecked(cwd, ["diff", "--shortstat"]).stdout.trim();
-    const untrackedBody = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
     const tracked = listUniqueFiles(state.staged, state.unstaged);
     const truncated = collectTruncatedDiff(
       cwd,
@@ -385,13 +395,14 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
       () => ["diff", "HEAD", "--binary", "--no-ext-diff", "--submodule=diff"],
       options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
     );
+    omittedFiles = listUniqueFiles(truncated.omitted, untracked.omitted);
     parts = [
       formatSection("Git Status", status),
       formatSection("Staged Diff Stat", stagedStat),
       formatSection("Unstaged Diff Stat", unstagedStat),
       formatSection("Diff (partial)", truncated.body),
-      formatSection("Files Not Included", formatOmittedFiles(truncated.omitted)),
-      formatSection("Untracked Files", untrackedBody)
+      formatSection("Files Not Included", formatOmittedFiles(omittedFiles)),
+      formatSection("Untracked Files", untracked.body)
     ];
   }
 
@@ -399,7 +410,8 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
     mode: "working-tree",
     summary: `Reviewing ${state.staged.length} staged, ${state.unstaged.length} unstaged, and ${state.untracked.length} untracked file(s).`,
     content: parts.join("\n"),
-    changedFiles
+    changedFiles,
+    omittedFiles
   };
 }
 
@@ -411,10 +423,10 @@ function collectBranchContext(cwd, baseRef, options = {}) {
   const logOutput = gitChecked(cwd, ["log", "--oneline", "--decorate", comparison.commitRange]).stdout.trim();
   const diffStat = gitChecked(cwd, ["diff", "--stat", comparison.commitRange]).stdout.trim();
 
-  return {
-    mode: "branch",
-    summary: `Reviewing branch ${currentBranch} against ${baseRef} from merge-base ${comparison.mergeBase}.`,
-    content: includeDiff
+  // Assigned by the truncated branch below; an inline diff omits nothing.
+  let omittedFiles = [];
+
+  const content = includeDiff
       ? [
           formatSection("Commit Log", logOutput),
           formatSection("Diff Stat", diffStat),
@@ -430,14 +442,21 @@ function collectBranchContext(cwd, baseRef, options = {}) {
             () => ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
             options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
           );
+          omittedFiles = truncated.omitted;
           return [
             formatSection("Commit Log", logOutput),
             formatSection("Diff Stat", truncateDiffStat(diffStat)),
             formatSection("Branch Diff (partial)", truncated.body),
             formatSection("Files Not Included", formatOmittedFiles(truncated.omitted))
           ].join("\n");
-        })(),
+        })();
+
+  return {
+    mode: "branch",
+    summary: `Reviewing branch ${currentBranch} against ${baseRef} from merge-base ${comparison.mergeBase}.`,
+    content,
     changedFiles,
+    omittedFiles,
     comparison
   };
 }
@@ -497,6 +516,13 @@ export function collectReviewContext(cwd, target, options = {}) {
     details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison, maxInlineDiffBytes });
   }
 
+  // What changed is not what was reviewed. A truncated diff drops whole files, and an
+  // untracked file can be skipped for its size or its type — so the reviewed set is the
+  // changed set minus everything that never made it into the prompt.
+  const omittedFiles = details.omittedFiles ?? [];
+  const omittedSet = new Set(omittedFiles);
+  const reviewedFiles = details.changedFiles.filter((file) => !omittedSet.has(file));
+
   return {
     cwd: repoRoot,
     repoRoot,
@@ -506,6 +532,8 @@ export function collectReviewContext(cwd, target, options = {}) {
     diffBytes,
     inputMode: includeDiff ? "inline-diff" : "truncated-diff",
     collectionGuidance: buildAdversarialCollectionGuidance({ includeDiff }),
-    ...details
+    ...details,
+    omittedFiles,
+    reviewedFiles
   };
 }

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.0
+
+- `--show-files` lists what a review actually covered. The report gains a `Files reviewed`
+  section and, when anything was left out, a `Files NOT reviewed` one — so a truncated run
+  names the files it never saw instead of leaving the reader to infer them from the diff
+  stat. The two lists together account for every changed file.
+- What changed is not what was reviewed, and the reviewed set is now computed rather than
+  assumed. A truncated diff drops whole files, and an untracked file can be skipped for
+  its size, for being binary, or for being a directory — each of those was already handled
+  somewhere in `git.mjs`, but none of it reached the report. `collectReviewContext` returns
+  `reviewedFiles` and `omittedFiles`, and `--json` carries both whether or not the flag
+  was passed.
+- A run that returned no usable review still lists its files. "What did it even look at?"
+  is the first question after a parse or shape failure, and both of those branches now
+  answer it.
+
 ## 1.6.0
 
 - `status` now says whether a run is alive. A job record reads `running` until something

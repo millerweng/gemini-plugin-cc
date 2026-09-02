@@ -100,8 +100,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [focus text]",
-      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [focus text]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files] [focus text]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
@@ -480,7 +480,12 @@ async function executeReviewRun(request) {
     context: {
       repoRoot: context.repoRoot,
       branch: context.branch,
-      summary: context.summary
+      summary: context.summary,
+      // Which files actually reached Gemini, and which never did. `--json` consumers get
+      // these whether or not `--show-files` was passed; the flag only controls the
+      // human-readable report.
+      reviewedFiles: context.reviewedFiles,
+      omittedFiles: context.omittedFiles
     },
     gemini: {
       status: result.status,
@@ -508,6 +513,9 @@ async function executeReviewRun(request) {
       stopReason: result.stopReason ?? null,
       reasoningSummary: result.reasoningSummary,
       showReasoning: Boolean(request.showReasoning),
+      showFiles: Boolean(request.showFiles),
+      reviewedFiles: context.reviewedFiles,
+      omittedFiles: context.omittedFiles,
       inputMode: context.inputMode,
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
@@ -617,7 +625,12 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
     context: {
       repoRoot: context.repoRoot,
       branch: context.branch,
-      summary: context.summary
+      summary: context.summary,
+      // Which files actually reached Gemini, and which never did. `--json` consumers get
+      // these whether or not `--show-files` was passed; the flag only controls the
+      // human-readable report.
+      reviewedFiles: context.reviewedFiles,
+      omittedFiles: context.omittedFiles
     },
     gemini: {
       // `??`, not `||`. This field reports the API invocation, and a pass can invoke
@@ -660,6 +673,9 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       targetLabel: context.target.label,
       reasoningSummary: combinedReasoning,
       showReasoning: Boolean(request.showReasoning),
+      showFiles: Boolean(request.showFiles),
+      reviewedFiles: context.reviewedFiles,
+      omittedFiles: context.omittedFiles,
       inputMode: context.inputMode,
       fileCount: context.fileCount,
       diffBytes: context.diffBytes,
@@ -954,7 +970,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
-    booleanOptions: ["json", "background", "wait", "show-reasoning", "progress"],
+    booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
   });
@@ -1001,6 +1017,7 @@ async function handleReviewCommand(argv, config) {
         focusText,
         reviewName: config.reviewName,
         showReasoning: Boolean(options["show-reasoning"]),
+        showFiles: Boolean(options["show-files"]),
         lensIds,
         onProgress: progress
       }),
