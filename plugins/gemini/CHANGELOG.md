@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.8.0
+
+- `/gemini:setup --enable-show-files` makes covered-file lists the default for a workspace,
+  so a truncated review names what it missed without anyone remembering the flag.
+  `--disable-show-files` undoes it, `--show-files` still turns it on for one run, and
+  `--hide-files` silences one run in a workspace that has the setting on.
+- `/gemini:setup --init` asks about every setting in turn and writes the answers. The
+  command runs as a non-interactive child process and cannot prompt, so it publishes an
+  `initPrompts` inventory — each setting, its current value, and the flag that applies each
+  answer — and Claude asks from that. Re-running it overwrites every answer, and the value
+  already in place is offered first.
+- The worktree inheritance rule moved into `lib/review-config.mjs` and now covers both
+  settings. It had lived in the CLI entry point, which is why the worktree test carried its
+  own copy of the logic and never guarded the real code; that test now calls the real
+  function.
+- `showReviewFiles` defaults to `null` rather than `false`, so unset and "explicitly off"
+  stay distinguishable. Without that, a worktree could never turn the setting off — it
+  would inherit `true` back from the main checkout on the next lookup.
+
 ## 1.7.0
 
 - `--show-files` lists what a review actually covered. The report gains a `Files reviewed`

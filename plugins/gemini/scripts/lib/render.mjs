@@ -280,9 +280,27 @@ export function renderSetupReport(report) {
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     `- review base: ${report.reviewBase ?? "auto-detected"}${report.reviewBaseInheritedFrom ? ` (inherited from ${report.reviewBaseInheritedFrom})` : ""}`,
+    `- covered-file list in reports: ${report.showReviewFiles ? "on" : "off"}${report.showReviewFilesSource === "default" ? " (default)" : ""}${report.showReviewFilesInheritedFrom ? ` (inherited from ${report.showReviewFilesInheritedFrom})` : ""}`,
     ...(report.configFile ? [`- settings file: ${report.configFile}`] : []),
     ""
   ];
+
+  // Printed for a human running `setup --init` by hand. Claude reads the same list from
+  // --json and turns it into questions.
+  if (Array.isArray(report.initPrompts) && report.initPrompts.length > 0) {
+    lines.push("Settings to confirm:");
+    for (const prompt of report.initPrompts) {
+      lines.push(`- ${prompt.header} — currently ${prompt.current}`);
+      lines.push(`  ${prompt.question}`);
+      for (const option of prompt.options) {
+        lines.push(`  - ${option.label}${option.apply ? ` (${option.apply})` : ""}: ${option.description}`);
+      }
+      if (prompt.freeText) {
+        lines.push(`  - ${prompt.freeText}`);
+      }
+    }
+    lines.push("");
+  }
 
   if (report.actionsTaken.length > 0) {
     lines.push("Actions taken:");

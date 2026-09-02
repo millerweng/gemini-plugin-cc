@@ -33,7 +33,11 @@ function defaultState() {
       // Base ref reviews compare against when --base is not given. Auto-detection
       // follows origin/HEAD, which is wrong for repositories that merge into a
       // long-lived integration branch instead of the default branch.
-      reviewBase: null
+      reviewBase: null,
+      // Whether every review report lists the files it covered. `null` is unset rather
+      // than off, so a worktree can turn it off without inheriting `true` back from the
+      // main checkout.
+      showReviewFiles: null
     },
     jobs: []
   };

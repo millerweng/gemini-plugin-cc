@@ -43,7 +43,7 @@ to do, check that the marketplace advertises a higher version than
 | `/gemini:adversarial-review` | Challenge the approach, design, and assumptions |
 | `/gemini:rescue` | Delegate investigation, diagnosis, or a fix |
 | `/gemini:transfer` | Carry this session into a resumable Gemini session |
-| `/gemini:setup` | Check readiness, toggle the review gate, pin the review base |
+| `/gemini:setup` | Check readiness, or configure everything with `--init` |
 | `/gemini:status` | Active and recent jobs, and whether each running one is still alive |
 | `/gemini:result` | Stored output of a finished job |
 | `/gemini:cancel` | Cancel an active background job |
@@ -154,6 +154,15 @@ long session with a dirty tree it cannot perfectly separate this turn's edits fr
 
 ## Configuration
 
+**Walk through everything once.** `--init` asks about each setting in turn and writes your
+answers. Re-run it any time — every answer overwrites what was there, and the option you
+already have is offered first:
+
+```bash
+/gemini:setup --init
+```
+
+
 **Pin a review base.** Auto-detection follows `origin/HEAD`. If your work merges into a
 long-lived integration branch, that merge-base sits far behind and every review silently covers
 everything since:
@@ -165,6 +174,17 @@ everything since:
 The ref is resolved when you set it, so a typo fails immediately. Each git worktree is its own
 workspace, and a worktree with no base of its own inherits the main checkout's. A pinned base
 only supplies the ref for a branch review — uncommitted changes still take precedence.
+
+**Always list covered files.** Turn `--show-files` on for every review in this workspace,
+so a truncated run names what it missed without you remembering the flag:
+
+```bash
+/gemini:setup --enable-show-files   # --disable-show-files to undo
+```
+
+`--show-files` still turns it on for a single run, and `--hide-files` silences one run in a
+workspace where the setting is on. Worktrees inherit the setting the same way the review
+base does, and a worktree that turns it off stays off.
 
 **Settings location.** Setup reports the file it wrote to. Settings live under
 `CLAUDE_PLUGIN_DATA`, which Claude Code sets and a plain shell does not, so running the

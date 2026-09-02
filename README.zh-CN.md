@@ -42,7 +42,7 @@
 | `/gemini:adversarial-review` | 质疑实现方式、设计和假设 |
 | `/gemini:rescue` | 把调查、诊断或修复交给 Gemini |
 | `/gemini:transfer` | 把当前会话转成可 resume 的 Gemini 会话 |
-| `/gemini:setup` | 检查环境、开关审查门、固定 review base |
+| `/gemini:setup` | 检查环境，或者用 `--init` 一次配完所有设置 |
 | `/gemini:status` | 查看进行中和最近的任务，以及每个运行中的任务是否还活着 |
 | `/gemini:result` | 查看已完成任务的输出 |
 | `/gemini:cancel` | 取消一个后台任务 |
@@ -150,6 +150,13 @@ gate 拿到的是 Claude 最后一段回复和仓库当前状态，不是这一�
 
 ## 配置
 
+**一次问完所有配置。** `--init` 会挨个问你每项设置，然后把答案写进去。
+随时可以重跑，每个答案都会覆盖原值，而且当前的选项排在第一个：
+
+```bash
+/gemini:setup --init
+```
+
 **固定 review base。** 自动检测跟着 `origin/HEAD` 走。
 如果你的分支最后合进一个长期存在的集成分支，merge-base 会落得很靠后，
 每次 review 都会把这之后的所有改动算进来：
@@ -163,6 +170,17 @@ ref 在设置时就解析，写错了当场报错。
 每个 git worktree 是独立的 workspace。worktree 自己没设 base，就继承主 checkout 的。
 
 固定的 base 只在做 branch review 时提供 ref。有未提交改动时，还是优先 review 未提交的部分。
+
+**让 review 一直列出覆盖了哪些文件。** 在这个 workspace 里把 `--show-files` 设成常开，
+这样截断的时候不用你记得加参数，报告自己就会写明漏了什么：
+
+```bash
+/gemini:setup --enable-show-files   # 用 --disable-show-files 撤销
+```
+
+`--show-files` 仍然可以只对单次生效。设置开着时，用 `--hide-files` 让某一次不列。
+
+worktree 的继承规则和 review base 一样。worktree 自己关掉的，就保持关闭。
 
 **配置写在哪。** setup 会打印它写到了哪个文件。
 配置放在 `CLAUDE_PLUGIN_DATA` 下面。这个变量由 Claude Code 设置，普通 shell 里没有。

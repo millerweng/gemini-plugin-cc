@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
-argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(wc:*), AskUserQuestion
 ---
 
@@ -71,6 +71,7 @@ Coverage reporting:
 - When any of these appear, open with one sentence of your own naming the limit and what it leaves uncovered, then give the verbatim output. Presenting a partial review as a clean verdict is the failure this rule prevents.
 - Then offer a narrower rerun: a tighter `--base <ref>`, or `--scope working-tree` when only the uncommitted change matters.
 - `--show-files` adds two explicit lists to the report: the files the review covered, and the files it never saw. Offer it alongside the narrower rerun whenever the user needs to know exactly what was missed.
+- A workspace can have those lists on for every review (`/gemini:setup --enable-show-files`), in which case they appear without the flag. `--hide-files` silences one such run.
 - With no `Warning:` line, return the output verbatim and add nothing.
 
 Foreground flow:

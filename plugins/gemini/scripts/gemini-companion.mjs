@@ -30,12 +30,13 @@ import {
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
   collectReviewContext,
+  detectDefaultBranch,
   ensureGitRepository,
-  getMainWorktreeRoot,
   resolveReviewTarget
 } from "./lib/git.mjs";
 import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
+import { resolveConfiguredReviewBase, resolveShowReviewFiles } from "./lib/review-config.mjs";
 import { buildLensDirective, getLens, mergeLensReviews, resolveLensIds } from "./lib/review-lenses.mjs";
 import {
   generateJobId,
@@ -100,8 +101,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files] [focus text]",
-      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files] [focus text]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [focus text]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
       "  node scripts/gemini-companion.mjs transfer [--source <claude-jsonl>] [--include-tool-output] [--json]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json]",
@@ -169,27 +170,6 @@ function resolveCommandWorkspace(options = {}) {
   return resolveWorkspaceRoot(resolveCommandCwd(options));
 }
 
-/**
- * A linked worktree is its own workspace, so settings do not carry over from the
- * checkout it was created from. Setting the same base in every short-lived worktree is
- * busywork, so an unset worktree falls back to the main worktree's value. Setting it
- * on the worktree still wins.
- */
-function resolveConfiguredReviewBase(cwd, workspaceRoot) {
-  const own = getConfig(workspaceRoot).reviewBase || null;
-  if (own) {
-    return { base: own, inheritedFrom: null };
-  }
-
-  const mainRoot = getMainWorktreeRoot(cwd);
-  if (!mainRoot || mainRoot === workspaceRoot) {
-    return { base: null, inheritedFrom: null };
-  }
-
-  const inherited = getConfig(mainRoot).reviewBase || null;
-  return inherited ? { base: inherited, inheritedFrom: mainRoot } : { base: null, inheritedFrom: null };
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -217,6 +197,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const authStatus = await getGeminiAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
   const reviewBase = resolveConfiguredReviewBase(cwd, workspaceRoot);
+  const showReviewFiles = resolveShowReviewFiles(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -242,6 +223,9 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     reviewGateEnabled: Boolean(config.stopReviewGate),
     reviewBase: reviewBase.base,
     reviewBaseInheritedFrom: reviewBase.inheritedFrom,
+    showReviewFiles: showReviewFiles.enabled,
+    showReviewFilesSource: showReviewFiles.source,
+    showReviewFilesInheritedFrom: showReviewFiles.inheritedFrom,
     // Where settings land depends on CLAUDE_PLUGIN_DATA, which Claude Code sets and a
     // plain shell does not. Running this command by hand writes to the temp fallback
     // instead, and the plugin then never reads it back — so name the file.
@@ -249,6 +233,81 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     actionsTaken,
     nextSteps
   };
+}
+
+// `--init` cannot ask anything itself: this runs as a non-interactive child process, so
+// there is no prompt to show. It publishes the questions instead — every setting, its
+// current value, and the flag that applies each answer — and Claude asks them. Re-running
+// it is how a setting gets changed, since every answer is written whatever it was before.
+function buildSetupInitPrompts(cwd, report) {
+  let detectedBase = null;
+  try {
+    detectedBase = detectDefaultBranch(cwd);
+  } catch {
+    detectedBase = null;
+  }
+
+  const baseOptions = [
+    {
+      label: "Auto-detect",
+      description: `Compare against the repository default branch${detectedBase ? ` (${detectedBase} right now)` : ""}. Wrong when work merges into a long-lived integration branch.`,
+      apply: "--clear-review-base"
+    }
+  ];
+  if (report.reviewBase) {
+    baseOptions.push({
+      label: `Keep ${report.reviewBase}`,
+      description: "Leave the pinned base as it is.",
+      apply: null
+    });
+  }
+
+  return [
+    {
+      key: "reviewBase",
+      header: "Review base",
+      question: "What should reviews compare against when --base is not given?",
+      current: report.reviewBase ?? "auto-detected",
+      freeText: "Any git ref. Applies as `--set-review-base <ref>`.",
+      options: baseOptions
+    },
+    {
+      key: "showReviewFiles",
+      header: "Covered files",
+      question: "Should every review report list the files it actually covered?",
+      current: report.showReviewFiles ? "on" : "off",
+      options: [
+        {
+          label: "Yes",
+          description: "Each report ends with the files reviewed, and the files left out. Makes a truncated review obvious.",
+          apply: "--enable-show-files"
+        },
+        {
+          label: "No",
+          description: "Shorter reports. Pass --show-files when you want the lists for one run.",
+          apply: "--disable-show-files"
+        }
+      ]
+    },
+    {
+      key: "reviewGate",
+      header: "Review gate",
+      question: "Should Claude be blocked from stopping until Gemini has reviewed the work?",
+      current: report.reviewGateEnabled ? "enabled" : "disabled",
+      options: [
+        {
+          label: "No",
+          description: "Reviews stay on demand. This is the default.",
+          apply: "--disable-review-gate"
+        },
+        {
+          label: "Yes",
+          description: "Every stop triggers a review first. Costs Gemini quota and minutes on each one.",
+          apply: "--enable-review-gate"
+        }
+      ]
+    }
+  ];
 }
 
 async function handleSetup(argv) {
@@ -259,7 +318,10 @@ async function handleSetup(argv) {
       "verify",
       "enable-review-gate",
       "disable-review-gate",
-      "clear-review-base"
+      "clear-review-base",
+      "enable-show-files",
+      "disable-show-files",
+      "init"
     ],
     // No free-text arguments here, so an unrecognised flag is a mistake, not content.
     rejectUnknownOptions: true
@@ -270,6 +332,9 @@ async function handleSetup(argv) {
   }
   if (options["set-review-base"] && options["clear-review-base"]) {
     throw new Error("Choose either --set-review-base <ref> or --clear-review-base.");
+  }
+  if (options["enable-show-files"] && options["disable-show-files"]) {
+    throw new Error("Choose either --enable-show-files or --disable-show-files.");
   }
 
   const cwd = resolveCommandCwd(options);
@@ -302,7 +367,18 @@ async function handleSetup(argv) {
     actionsTaken.push(`Cleared the default review base for ${workspaceRoot}; auto-detection applies again.`);
   }
 
+  if (options["enable-show-files"]) {
+    setConfig(workspaceRoot, "showReviewFiles", true);
+    actionsTaken.push(`Reviews in ${workspaceRoot} now list the files they covered. Pass --hide-files to silence one run.`);
+  } else if (options["disable-show-files"]) {
+    setConfig(workspaceRoot, "showReviewFiles", false);
+    actionsTaken.push(`Reviews in ${workspaceRoot} no longer list covered files. Pass --show-files for one run.`);
+  }
+
   const finalReport = await buildSetupReport(cwd, actionsTaken);
+  if (options.init) {
+    finalReport.initPrompts = buildSetupInitPrompts(cwd, finalReport);
+  }
 
   if (options.verify && finalReport.gemini.available) {
     const connectivity = await verifyGeminiConnectivity(cwd);
@@ -970,7 +1046,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
-    booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "progress"],
+    booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
   });
@@ -989,6 +1065,12 @@ async function handleReviewCommand(argv, config) {
   // A configured base is a deliberate choice for this workspace, so it counts as
   // explicit and is not second-guessed the way auto-detection is.
   const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
+  // The workspace setting decides this unless the run says otherwise, so a repository can
+  // turn covered-file reporting on once instead of remembering the flag every time.
+  const showFiles = resolveShowReviewFiles(cwd, workspaceRoot, {
+    showFilesFlag: Boolean(options["show-files"]),
+    hideFilesFlag: Boolean(options["hide-files"])
+  });
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     defaultBase: configuredBase,
@@ -1017,7 +1099,7 @@ async function handleReviewCommand(argv, config) {
         focusText,
         reviewName: config.reviewName,
         showReasoning: Boolean(options["show-reasoning"]),
-        showFiles: Boolean(options["show-files"]),
+        showFiles: showFiles.enabled,
         lensIds,
         onProgress: progress
       }),

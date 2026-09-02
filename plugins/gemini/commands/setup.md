@@ -1,6 +1,6 @@
 ---
-description: Check whether the local Gemini CLI is ready, toggle the stop-time review gate, or set the default review base
-argument-hint: '[--verify] [--enable-review-gate|--disable-review-gate] [--set-review-base <ref>|--clear-review-base]'
+description: Check whether the local Gemini CLI is ready, walk through every setting with --init, toggle the stop-time review gate, set the default review base, or make reviews always list the files they covered
+argument-hint: '[--init] [--verify] [--enable-review-gate|--disable-review-gate] [--set-review-base <ref>|--clear-review-base] [--enable-show-files|--disable-show-files]'
 allowed-tools: Bash(node:*), Bash(npm:*), AskUserQuestion
 ---
 
@@ -30,6 +30,21 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" setup --json $ARGUMENT
 
 If Gemini is already installed or npm is unavailable:
 - Do not ask about installation.
+
+Guided setup (`--init`):
+
+- `--init` makes the command publish an `initPrompts` list instead of asking anything itself — it runs as a non-interactive child process and has no prompt to show. Each entry carries `header`, `question`, `current`, and `options`, and each option carries the `apply` flag that writes that answer.
+- Ask every entry in one `AskUserQuestion` call, one question per entry, in the order the list gives them. Use each entry's `header` and `question` verbatim, and each option's `label` and `description`.
+- Put the option matching `current` first and suffix its label with `(Recommended)`, so re-running `--init` defaults to keeping what is already set.
+- The review base entry carries a `freeText` note. The user can answer with any git ref through the "Other" choice; turn that answer into `--set-review-base <ref>`.
+- Then apply every answer in one run, collecting the `apply` flags of the chosen options. Skip options whose `apply` is `null` — those mean "leave it alone":
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" setup <collected flags>
+```
+
+- Present that second run's output, which names each setting's new value under `Actions taken:`.
+- `--init` is re-runnable and every answer overwrites what was there. Say so if the user asks whether it is safe to run again.
 
 Output rules:
 - Present the final setup output to the user.
