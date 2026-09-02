@@ -16,10 +16,19 @@ export function parseArgs(argv, config = {}) {
   // makes a no-op look like it worked, which is how `setup --set-review-base <ref>`
   // reported success on a build that had no such flag.
   const rejectUnknownOptions = config.rejectUnknownOptions === true;
+  // The build label matters more than it looks. A Claude Code session resolves the plugin
+  // once at startup, so a session that began before an upgrade keeps running the old copy
+  // — and a flag added in the new one comes back as "unknown option", which reads like a
+  // bug in the flag rather than a stale session. Naming the build makes the skew visible.
+  // Passed in rather than read from plugin.json so this module keeps no dependencies.
+  const buildLabel = typeof config.buildLabel === "string" && config.buildLabel ? config.buildLabel : null;
   const unknownOption = (token) => {
     const known = [...booleanOptions, ...valueOptions, ...optionalValueOptions].sort();
     return new Error(
-      `Unknown option ${token}. This command accepts: ${known.map((name) => `--${name}`).join(", ")}.`
+      `Unknown option ${token}. This command accepts: ${known.map((name) => `--${name}`).join(", ")}.` +
+        (buildLabel
+          ? ` Running ${buildLabel}. If that flag exists in a newer release, this session loaded the plugin before the upgrade — restart the session to pick it up.`
+          : "")
     );
   };
 

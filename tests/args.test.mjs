@@ -92,3 +92,29 @@ test("an optional-value flag coerces the string \"true\" like it coerces \"false
   const { options } = parseArgs(["--multi=true"], { optionalValueOptions: ["multi"] });
   assert.equal(options.multi, true);
 });
+
+// A Claude Code session resolves the plugin once at startup, so a session that began
+// before an upgrade keeps running the old copy. A flag added in the new one then comes
+// back as "unknown option", which reads like a broken flag rather than a stale session.
+test("the unknown-option error names the build it is running", () => {
+  assert.throws(
+    () =>
+      parseArgs(["--set-max-diff-bytes", "1m"], {
+        booleanOptions: ["json"],
+        rejectUnknownOptions: true,
+        buildLabel: "gemini-companion 1.8.1"
+      }),
+    /Running gemini-companion 1\.8\.1\..*restart the session/s
+  );
+});
+
+test("the unknown-option error stays clean without a build label", () => {
+  assert.throws(
+    () => parseArgs(["--nope"], { booleanOptions: ["json"], rejectUnknownOptions: true }),
+    (error) => {
+      assert.match(error.message, /Unknown option --nope/);
+      assert.doesNotMatch(error.message, /Running|restart the session/);
+      return true;
+    }
+  );
+});

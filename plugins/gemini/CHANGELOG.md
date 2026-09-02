@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.1
+
+- An unknown-option error names the build it is running. A Claude Code session resolves the
+  plugin once at startup, so a session that began before an upgrade keeps running the old
+  copy from `~/.claude/plugins/cache/.../<version>/`. A flag added in the new release then
+  comes back as "Unknown option", which reads like a broken flag rather than a stale
+  session — the message now says which version answered and that restarting picks up the
+  newer one.
+
 ## 1.9.0
 
 - The 256 KB diff budget is configurable. `--max-diff-bytes 512kb` raises it for one run,

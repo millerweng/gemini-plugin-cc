@@ -159,8 +159,25 @@ function normalizeArgv(argv) {
   return argv;
 }
 
+// Read once, and never fatal: a missing or malformed manifest must not stop a command
+// whose only use for the version is a better error message.
+function readPluginVersion() {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, ".claude-plugin", "plugin.json"), "utf8")
+    );
+    return typeof manifest.version === "string" && manifest.version ? manifest.version : null;
+  } catch {
+    return null;
+  }
+}
+
+const PLUGIN_VERSION = readPluginVersion();
+const BUILD_LABEL = PLUGIN_VERSION ? `gemini-companion ${PLUGIN_VERSION}` : `gemini-companion from ${ROOT_DIR}`;
+
 function parseCommandInput(argv, config = {}) {
   return parseArgs(normalizeArgv(argv), {
+    buildLabel: BUILD_LABEL,
     ...config,
     aliasMap: {
       C: "cwd",
