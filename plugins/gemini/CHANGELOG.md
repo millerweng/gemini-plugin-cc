@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.10.0
+
+- The scope check asks instead of computing. Both review commands told Claude to run
+  `git diff --binary | wc -c` and compare against 256 KB, which went wrong the moment 1.9.0
+  made the budget configurable: a workspace set to 1 MB still got warned at 256 KB. The new
+  `review-scope` command answers `willTruncate` from the resolved budget, and the prompts
+  read that field rather than doing arithmetic against a remembered number.
+- The pre-flight measurement and the real run are the same code. Beyond the stale number,
+  the prompt's `git diff --binary HEAD | wc -c` never matched a working-tree review, which
+  measures staged and unstaged separately. Both callers go through `measureReviewDiff` now,
+  and a test asserts the verdict agrees with what the review does at three budgets.
+- A truncation warning no longer states a size it does not know. The measurement stops at
+  the budget and returns `ceiling + 1`, so a 5 MB diff was reported as "257 KB of diff" —
+  which made a one-step budget raise look like it would fix the truncation. It reads "at
+  least 257 KB" when the count hit that ceiling, and `review-scope` probes past the budget
+  so its own number is real.
+- `review-scope` also reports the paths carrying the most change, so a truncating review
+  can be explained by naming what pushed it over.
+- Both review commands drop `Bash(wc:*)` from their allowed tools; the manual byte math is
+  gone.
+
 ## 1.9.1
 
 - An unknown-option error names the build it is running. A Claude Code session resolves the

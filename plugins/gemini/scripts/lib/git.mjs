@@ -485,6 +485,104 @@ function buildAdversarialCollectionGuidance(options = {}) {
   ].join(" ");
 }
 
+// Measuring for a pre-flight check and measuring for the real run have to be the same
+// operation. When the check lived in the command prompt it was `git diff --binary | wc -c`
+// against a hardcoded 256 KB, which disagreed with this file on two counts: a working-tree
+// review measures staged and unstaged separately, and the budget is configurable. So both
+// callers go through here now.
+//
+// `measureGitOutputBytes` stops counting at its ceiling and returns `ceiling + 1`, which
+// is enough to decide truncation but not enough to report a size — a 5 MB diff measured
+// against 256 KB reads as "257 KB". `probeBytes` raises the ceiling when a caller wants a
+// real number, and `exact` says whether it got one.
+const SCOPE_PROBE_BYTES = 256 * 1024 * 1024;
+
+export function measureReviewDiff(repoRoot, target, options = {}) {
+  const maxInlineDiffBytes = normalizeMaxInlineDiffBytes(options.maxInlineDiffBytes);
+  const ceiling = Math.max(maxInlineDiffBytes, options.probeBytes ?? 0);
+
+  let diffBytes;
+  let comparison = null;
+  if (target.mode === "working-tree") {
+    diffBytes = measureCombinedGitOutputBytes(
+      repoRoot,
+      [
+        ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"],
+        ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]
+      ],
+      ceiling
+    );
+  } else {
+    comparison = options.comparison ?? buildBranchComparison(repoRoot, target.baseRef);
+    diffBytes = measureGitOutputBytes(
+      repoRoot,
+      ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
+      ceiling
+    );
+  }
+
+  return {
+    diffBytes,
+    exact: diffBytes <= ceiling,
+    maxInlineDiffBytes,
+    willTruncate: diffBytes > maxInlineDiffBytes,
+    comparison
+  };
+}
+
+/**
+ * What a review would cover, without running one. Same measurement and same truncation
+ * verdict as the real run, plus the paths carrying the most change so a caller can say
+ * which ones are pushing the diff over.
+ */
+export function measureReviewScope(cwd, target, options = {}) {
+  const repoRoot = getRepoRoot(cwd);
+  const measured = measureReviewDiff(repoRoot, target, {
+    ...options,
+    probeBytes: SCOPE_PROBE_BYTES
+  });
+
+  const numstatArgs =
+    target.mode === "working-tree"
+      ? ["diff", "--numstat", "HEAD"]
+      : ["diff", "--numstat", measured.comparison.commitRange];
+  const heaviestFiles = gitChecked(repoRoot, numstatArgs)
+    .stdout.trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [added, deleted, file] = line.split("\t");
+      // A binary file reports "-" for both counts.
+      const churn = (Number(added) || 0) + (Number(deleted) || 0);
+      return { file, churn, binary: added === "-" };
+    })
+    .sort((left, right) => right.churn - left.churn);
+
+  const state = target.mode === "working-tree" ? getWorkingTreeState(repoRoot) : null;
+  const changedFiles =
+    target.mode === "working-tree"
+      ? listUniqueFiles(state.staged, state.unstaged, state.untracked)
+      : gitChecked(repoRoot, ["diff", "--name-only", measured.comparison.commitRange])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+
+  return {
+    repoRoot,
+    branch: getCurrentBranch(repoRoot),
+    target,
+    fileCount: changedFiles.length,
+    changedFiles,
+    heaviestFiles,
+    diffBytes: measured.diffBytes,
+    diffBytesExact: measured.exact,
+    maxInlineDiffBytes: measured.maxInlineDiffBytes,
+    willTruncate: measured.willTruncate,
+    untrackedCount: state ? state.untracked.length : 0,
+    mergeBase: measured.comparison?.mergeBase ?? null
+  };
+}
+
 export function collectReviewContext(cwd, target, options = {}) {
   const repoRoot = getRepoRoot(cwd);
   const currentBranch = getCurrentBranch(repoRoot);
@@ -492,18 +590,14 @@ export function collectReviewContext(cwd, target, options = {}) {
   let details;
   let includeDiff;
   let diffBytes;
+  let diffBytesExact;
 
   if (target.mode === "working-tree") {
     const state = getWorkingTreeState(repoRoot);
-    diffBytes = measureCombinedGitOutputBytes(
-      repoRoot,
-      [
-        ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"],
-        ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]
-      ],
-      maxInlineDiffBytes
-    );
-    includeDiff = options.includeDiff ?? diffBytes <= maxInlineDiffBytes;
+    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes });
+    diffBytes = measured.diffBytes;
+    diffBytesExact = measured.exact;
+    includeDiff = options.includeDiff ?? !measured.willTruncate;
     details = collectWorkingTreeContext(repoRoot, state, {
       includeDiff,
       maxInlineDiffBytes,
@@ -511,13 +605,10 @@ export function collectReviewContext(cwd, target, options = {}) {
     });
   } else {
     const comparison = buildBranchComparison(repoRoot, target.baseRef);
-    const fileCount = gitChecked(repoRoot, ["diff", "--name-only", comparison.commitRange]).stdout.trim().split("\n").filter(Boolean).length;
-    diffBytes = measureGitOutputBytes(
-      repoRoot,
-      ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
-      maxInlineDiffBytes
-    );
-    includeDiff = options.includeDiff ?? diffBytes <= maxInlineDiffBytes;
+    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes, comparison });
+    diffBytes = measured.diffBytes;
+    diffBytesExact = measured.exact;
+    includeDiff = options.includeDiff ?? !measured.willTruncate;
     details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison, maxInlineDiffBytes });
   }
 
@@ -535,6 +626,10 @@ export function collectReviewContext(cwd, target, options = {}) {
     target,
     fileCount: details.changedFiles.length,
     diffBytes,
+    // False when the measurement stopped at its ceiling, so diffBytes is a lower bound
+    // rather than the real size. Reporting it as exact is how a 5 MB diff measured
+    // against a 256 KB budget got described as "257 KB of diff".
+    diffBytesExact,
     // The budget that produced this inputMode. The report names it so a truncated review
     // says which limit it hit, not just that it hit one.
     maxInlineDiffBytes,

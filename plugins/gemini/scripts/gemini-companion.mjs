@@ -32,6 +32,7 @@ import {
   collectReviewContext,
   DEFAULT_INLINE_DIFF_MAX_BYTES,
   detectDefaultBranch,
+  measureReviewScope,
   ensureGitRepository,
   resolveReviewTarget
 } from "./lib/git.mjs";
@@ -79,6 +80,7 @@ import {
   renderStoredJobResult,
   renderCancelReport,
   renderJobStatusReport,
+  renderReviewScopeReport,
   renderSetupReport,
   renderStatusReport,
   renderTaskResult
@@ -108,6 +110,7 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
+      "  node scripts/gemini-companion.mjs review-scope [--base <ref>] [--scope <auto|working-tree|branch>] [--max-diff-bytes <n|512kb|1mb>] [--json]",
       "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <n|512kb|1mb>] [focus text]",
       "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--multi[=<lens,...>]] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <n|512kb|1mb>] [focus text]",
       "  node scripts/gemini-companion.mjs task [--background] [--write] [--plan] [--resume-last|--resume|--fresh] [--model <model|alias>] [--effort <low|medium|high>] [prompt]",
@@ -664,6 +667,7 @@ async function executeReviewRun(request) {
       showFiles: Boolean(request.showFiles),
       reviewedFiles: context.reviewedFiles,
       omittedFiles: context.omittedFiles,
+      diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
@@ -827,6 +831,7 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       showFiles: Boolean(request.showFiles),
       reviewedFiles: context.reviewedFiles,
       omittedFiles: context.omittedFiles,
+      diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
@@ -1189,6 +1194,43 @@ async function handleReviewCommand(argv, config) {
   );
 }
 
+// Answers "would this review truncate?" without spending a review. The command prompts
+// used to work this out themselves — `git diff --binary | wc -c` against a hardcoded
+// 256 KB — which broke the moment the budget became configurable, and disagreed with the
+// real run for a working tree anyway. The number lives in one place now, and callers ask
+// rather than compute.
+async function handleReviewScope(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["base", "scope", "cwd", "max-diff-bytes"],
+    booleanOptions: ["json"],
+    rejectUnknownOptions: true
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
+  const target = resolveReviewTarget(cwd, {
+    base: options.base,
+    defaultBase: configuredBase,
+    scope: options.scope
+  });
+  target.baseSource = options.base ? "flag" : target.baseRef && configuredBase ? "config" : "detected";
+
+  const budget = resolveMaxInlineDiffBytes(cwd, workspaceRoot, {
+    flagValue: options["max-diff-bytes"]
+  });
+  const scope = measureReviewScope(cwd, target, { maxInlineDiffBytes: budget.bytes });
+
+  const payload = {
+    ...scope,
+    diffBytesLabel: `${scope.diffBytesExact ? "" : "at least "}${formatDiffByteBudget(scope.diffBytes)}`,
+    maxInlineDiffBytesLabel: formatDiffByteBudget(scope.maxInlineDiffBytes),
+    maxInlineDiffBytesSource: budget.source,
+    targetLabel: target.label
+  };
+  outputCommandResult(payload, renderReviewScopeReport(payload), options.json);
+}
+
 async function handleReview(argv) {
   return handleReviewCommand(argv, { reviewName: "Review" });
 }
@@ -1499,6 +1541,9 @@ async function main() {
   switch (subcommand) {
     case "setup":
       await handleSetup(argv);
+      break;
+    case "review-scope":
+      await handleReviewScope(argv);
       break;
     case "review":
       await handleReview(argv);

@@ -1,7 +1,7 @@
 ---
 description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
 argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [focus ...]'
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(wc:*), AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 
 Run an adversarial Gemini review through the shared plugin runtime.
@@ -25,11 +25,18 @@ Core constraint:
 - Keep the framing focused on whether the current approach is the right one, what assumptions it depends on, and where the design could fail under real-world conditions.
 
 Scope check (do this before the execution mode rules):
-- Measure the diff in bytes: `git diff --binary <base>...HEAD | wc -c` for a branch review, `git diff --binary HEAD | wc -c` for a working tree.
-- Past the diff budget the companion sends a partial diff, and the files that do not fit go unreviewed. The budget is 256 KB unless the workspace raised it; `/gemini:setup` reports the value in force.
-- Raising it is one of the two ways out, alongside a narrower range: `--max-diff-bytes 512kb` for this run, or `/gemini:setup --set-max-diff-bytes 512kb` for every run. A much larger prompt can spend the whole turn on reasoning and return nothing, so raise it a step at a time rather than to a round number that sounds safe.
-- Generated and copied files are the usual cause while the real change stays small — an installed plugin copy under `.claude`, build output, a lockfile. `git diff --stat` names them.
-- When the diff is over that limit, the review needs a narrower scope. Carry that into the `AskUserQuestion` below as a third, recommended option: rerun with a tighter `--base <ref>`. Name the heaviest paths in the question so the choice is informed.
+- Ask the companion whether this review would truncate, forwarding the same target flags the user gave:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" review-scope --json $ARGUMENTS
+```
+
+- Read `willTruncate` from that output. Do not work the answer out yourself: the budget is configurable per workspace, and the byte measurement differs between a working tree and a branch range, so a hand-rolled `git diff | wc -c` against a remembered number is wrong in both directions.
+- `willTruncate: false` means the whole diff fits. Say nothing about size and carry on.
+- `willTruncate: true` means some files would not be reviewed at all. The report names `heaviestFiles`, `diffBytesLabel`, and the budget in force — use those words rather than a number of your own.
+- Generated and copied files are the usual cause while the real change stays small: an installed plugin copy under `.claude`, build output, a lockfile. `heaviestFiles` names them.
+- Then carry two recommended options into the `AskUserQuestion` below, on top of wait and background: rerun with a tighter `--base <ref>`, and rerun with `--max-diff-bytes <size>` to raise the budget for this run. Name the heaviest paths in the question so the choice is informed.
+- Raising the budget for good is `/gemini:setup --set-max-diff-bytes <size>`. Mention it once, and raise a step at a time — a much larger prompt can spend the whole turn on reasoning and return nothing.
 
 Execution mode rules:
 - If the raw arguments include `--wait`, do not ask. Run in the foreground.
@@ -43,7 +50,7 @@ Execution mode rules:
   - Recommend waiting only when the scoped review is clearly tiny, roughly 1-2 files total and no sign of a broader directory-sized change.
   - In every other case, including unclear size, recommend background.
   - When in doubt, run the review instead of declaring that there is nothing to review.
-- Then use `AskUserQuestion` exactly once, with the two options below plus the narrower-scope option when the scope check called for it. Put the recommended option first and suffix its label with `(Recommended)`:
+- Then use `AskUserQuestion` exactly once, with the two options below plus the narrowing options the scope check called for. Put the recommended option first and suffix its label with `(Recommended)`:
   - `Wait for results`
   - `Run in background`
 

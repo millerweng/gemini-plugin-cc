@@ -96,6 +96,16 @@ what it never saw. The budget is 256 KB by default; raise it per run with
 `--max-diff-bytes 512kb`, or for the workspace with
 `/gemini:setup --set-max-diff-bytes 512kb`.
 
+To find out before spending a review, ask:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/gemini-companion.mjs" review-scope
+```
+
+It reports the diff size, the budget in force, whether the review would truncate, and the
+paths carrying the most change. Both review commands run it themselves before asking you
+to wait or detach.
+
 ### Multi-lens review
 
 A single pass has to weigh every concern at once, and the prompt's own calibration rules then

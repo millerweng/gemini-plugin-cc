@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Gemini plugin to use in Claude Code for delegation and code review. Fork of m-ghalib/gemini-plugin-cc with OAuth readiness fixes and /gemini:transfer.",
-    "version": "1.9.1"
+    "version": "1.10.0"
   },
   "plugins": [
     {
       "name": "gemini",
       "description": "Use Gemini from Claude Code to review code or delegate tasks.",
-      "version": "1.9.1",
+      "version": "1.10.0",
       "author": {
         "name": "Momin Abrar Ghalib",
         "url": "https://github.com/m-ghalib"

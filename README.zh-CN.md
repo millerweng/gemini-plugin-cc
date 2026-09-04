@@ -93,6 +93,15 @@ diff 超过预算时只会发一部分，报告里会写明撞的是哪个预算
 预算默认 256 KB。单次抬高用 `--max-diff-bytes 512kb`，
 整个 workspace 用 `/gemini:setup --set-max-diff-bytes 512kb`。
 
+想在花掉一次 review 之前先知道会不会截断：
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/gemini-companion.mjs" review-scope
+```
+
+它会报出 diff 多大、当前预算是多少、会不会截断、以及改动最多的那几个文件。
+两个 review 命令在问你「前台还是后台」之前，自己就会先跑一遍。
+
 ### 多路 review
 
 一次 review 要同时权衡所有问题。prompt 里的评分规则又会让 Gemini 只报它认为最严重的那个，

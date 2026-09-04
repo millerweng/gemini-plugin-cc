@@ -266,6 +266,48 @@ function appendReasoningSection(lines, reasoningSummary) {
   }
 }
 
+export function renderReviewScopeReport(report) {
+  const lines = [
+    "# Gemini Review Scope",
+    "",
+    `Target: ${report.targetLabel}`,
+    `Files changed: ${report.fileCount}`,
+    `Diff size: ${report.diffBytesLabel}`,
+    `Budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ` (${report.maxInlineDiffBytesSource})`}`,
+    ""
+  ];
+
+  if (report.willTruncate) {
+    lines.push(
+      "Verdict: TRUNCATES. Some files would not be reviewed at all.",
+      "Narrow the range with a tighter `--base <ref>`, or raise the budget with `--max-diff-bytes <size>`.",
+      ""
+    );
+    // Named so a caller can say what is pushing the diff over rather than just that it is
+    // over. Churn, not bytes: git reports line counts per file, and the ranking is what
+    // matters here.
+    const heaviest = (report.heaviestFiles ?? []).slice(0, 8);
+    if (heaviest.length > 0) {
+      lines.push("Heaviest paths:");
+      for (const entry of heaviest) {
+        lines.push(`- ${entry.file} (${entry.binary ? "binary" : `${entry.churn} lines`})`);
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("Verdict: fits. The whole diff would be reviewed.", "");
+  }
+
+  if (report.untrackedCount > 0) {
+    lines.push(
+      `${report.untrackedCount} untracked file(s) are sent as whole content under a separate budget: 24 KB each, 128 KB in total.`,
+      ""
+    );
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
 export function renderSetupReport(report) {
   const lines = [
     "# Gemini Setup",
@@ -526,9 +568,14 @@ export function renderReviewResult(parsedResult, meta) {
   // The diff was truncated to fit. The findings are still grounded in real diff text,
   // but they cannot cover the files that were left out.
   if (meta.inputMode === "truncated-diff") {
+    // The measurement stops at the budget, so diffBytes is a lower bound whenever it hit
+    // that ceiling. Printing it bare is how a 5 MB diff got reported as "257 KB of diff",
+    // which makes a one-step budget raise look like it would fix the truncation.
     const scale = [
       Number.isFinite(meta.fileCount) ? `${meta.fileCount} files` : null,
-      Number.isFinite(meta.diffBytes) ? `${Math.ceil(meta.diffBytes / 1024)} KB of diff` : null
+      Number.isFinite(meta.diffBytes)
+        ? `${meta.diffBytesExact === false ? "at least " : ""}${Math.ceil(meta.diffBytes / 1024)} KB of diff`
+        : null
     ]
       .filter(Boolean)
       .join(", ");
