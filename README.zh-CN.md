@@ -115,6 +115,8 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/gemini-companion.mjs" review-scope
 它会报出 diff 多大、当前预算是多少、会不会截断、以及改动最多的那几个文件。
 两个 review 命令在问你「前台还是后台」之前，自己就会先跑一遍。
 
+它接受和 review 一样的参数。像 `--multi`、`--background` 这种影响不到判定的，会被接受然后忽略。
+
 ### 多路 review
 
 一次 review 要同时权衡所有问题。prompt 里的评分规则又会让 Gemini 只报它认为最严重的那个，

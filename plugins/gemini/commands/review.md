@@ -23,7 +23,7 @@ Core constraint:
 - Your only job is to run the review and return Gemini's output verbatim to the user.
 
 Scope check (do this before the execution mode rules):
-- Ask the companion whether this review would truncate, forwarding the same target flags the user gave:
+- Ask the companion whether this review would truncate. Forward `$ARGUMENTS` verbatim — the command takes the same flags the review takes and ignores the ones that cannot change the answer, so there is nothing to filter out:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" review-scope --json $ARGUMENTS

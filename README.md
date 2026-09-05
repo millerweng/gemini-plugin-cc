@@ -117,7 +117,8 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/gemini-companion.mjs" review-scope
 
 It reports the diff size, the budget in force, whether the review would truncate, and the
 paths carrying the most change. Both review commands run it themselves before asking you
-to wait or detach.
+to wait or detach, and it takes the same flags they do — the ones that cannot change the
+answer, such as `--multi` and `--background`, are accepted and ignored.
 
 ### Multi-lens review
 

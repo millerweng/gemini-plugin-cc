@@ -118,3 +118,47 @@ test("the truncating report names the budget and the heaviest paths", () => {
   assert.match(output, /Heaviest paths:/);
   assert.match(output, /- a\.js \(\d+ lines\)/);
 });
+
+// The command prompts forward `$ARGUMENTS` verbatim, so this command is handed the whole
+// review invocation. Rejecting a review-only flag there fails the pre-flight check that
+// exists to keep a review from silently covering less than it looks like.
+test("review-scope accepts every flag the review command accepts", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const cwd = repoWithChange("scope-flags-", { lines: 2, files: ["a.js"] });
+  const script = path.join(
+    path.dirname(new URL(import.meta.url).pathname),
+    "..",
+    "plugins",
+    "gemini",
+    "scripts",
+    "gemini-companion.mjs"
+  );
+
+  const run = (args) =>
+    spawnSync(process.execPath, [script, "review-scope", "--cwd", cwd, ...args], {
+      encoding: "utf8"
+    });
+
+  // The exact invocation that failed: review-only flags forwarded to the scope check.
+  const forwarded = run(["--json", "--multi", "--background"]);
+  assert.equal(forwarded.status, 0, forwarded.stderr);
+  assert.equal(JSON.parse(forwarded.stdout).willTruncate, false);
+
+  const everything = run([
+    "--json",
+    "--multi=security,resilience",
+    "--wait",
+    "--show-reasoning",
+    "--show-files",
+    "--progress",
+    "--model",
+    "pro",
+    "focus text the user typed"
+  ]);
+  assert.equal(everything.status, 0, everything.stderr);
+
+  // A real typo still fails, so the tolerance did not turn into swallowing mistakes.
+  const typo = run(["--no-such-flag"]);
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /Unknown option --no-such-flag/);
+});

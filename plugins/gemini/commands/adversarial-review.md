@@ -25,7 +25,7 @@ Core constraint:
 - Keep the framing focused on whether the current approach is the right one, what assumptions it depends on, and where the design could fail under real-world conditions.
 
 Scope check (do this before the execution mode rules):
-- Ask the companion whether this review would truncate, forwarding the same target flags the user gave:
+- Ask the companion whether this review would truncate. Forward `$ARGUMENTS` verbatim — the command takes the same flags the review takes and ignores the ones that cannot change the answer, so there is nothing to filter out:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" review-scope --json $ARGUMENTS

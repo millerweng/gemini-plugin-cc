@@ -1255,9 +1255,25 @@ async function handleReviewCommand(argv, config) {
 // real run for a working tree anyway. The number lives in one place now, and callers ask
 // rather than compute.
 async function handleReviewScope(argv) {
+  // Callers hand this the review invocation verbatim — the command prompts forward
+  // `$ARGUMENTS` — so it accepts everything `review` accepts and ignores what cannot change
+  // the answer. `--multi` runs the same diff three times and `--wait` only decides who
+  // blocks; neither moves the truncation verdict. Declaring them keeps
+  // `rejectUnknownOptions` on for real typos instead of trading one failure for another.
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "cwd", "max-diff-bytes", "exclude"],
-    booleanOptions: ["json", "no-exclude"],
+    valueOptions: ["base", "scope", "cwd", "max-diff-bytes", "exclude", "model"],
+    booleanOptions: [
+      "json",
+      "no-exclude",
+      "background",
+      "wait",
+      "show-reasoning",
+      "show-files",
+      "hide-files",
+      "progress"
+    ],
+    optionalValueOptions: ["multi"],
+    aliasMap: { m: "model" },
     rejectUnknownOptions: true
   });
 

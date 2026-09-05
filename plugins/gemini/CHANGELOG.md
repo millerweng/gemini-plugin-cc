@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.12.1
+
+- `review-scope` accepts every flag `review` accepts. The command prompts forward
+  `$ARGUMENTS` verbatim, so a review invoked with `--multi` or `--background` handed those
+  to the scope check, which declared only the target flags and rejected them. The
+  pre-flight check that keeps a review from silently covering less than it looks like was
+  the thing that failed. Flags that cannot move the truncation verdict are declared and
+  ignored, and a real typo still fails.
+- The prompts say to forward `$ARGUMENTS` verbatim rather than "the target flags", which
+  was the instruction that did not match what they actually wrote.
+
 ## 1.12.0
 
 - A `--show-files` report names the exclusions as a chosen scope. 1.11.0 printed the
