@@ -161,3 +161,87 @@ test("a corrupt stored exclude list falls back to excluding nothing", () => {
     assert.equal(resolved.source, "default");
   });
 });
+
+// A reader who sees only "4 files reviewed" cannot tell a deliberately narrowed review
+// from one that lost 18 files to truncation, and those call for opposite reactions.
+test("the report separates a chosen scope from a coverage gap", async () => {
+  const { renderReviewResult } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "Fine.", findings: [] }, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      showFiles: true,
+      reviewedFiles: ["developer/a.md"],
+      omittedFiles: ["big.js"],
+      excludePatterns: [".claude", ".gemini"],
+      excludedFiles: ["...".repeat(0)].slice(0, 0).concat(Array.from({ length: 8 }, (_, i) => `.claude/x${i}.md`))
+    }
+  );
+
+  assert.match(output, /Deliberately excluded: \.claude, \.gemini — 8 changed file\(s\) held back/);
+  assert.match(output, /not a coverage gap/);
+  // The gap list stays separate and keeps its own wording.
+  assert.match(output, /Files NOT reviewed \(1\) — their content never reached Gemini:/);
+});
+
+test("no exclusion means no excluded-scope line at all", async () => {
+  const { renderReviewResult } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "Fine.", findings: [] }, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      showFiles: true,
+      reviewedFiles: ["a.js"],
+      omittedFiles: [],
+      excludePatterns: []
+    }
+  );
+  assert.doesNotMatch(output, /Deliberately excluded/);
+});
+
+test("the excluded file list is derived, so a wide glob is visible rather than silent", () => {
+  const cwd = repoWithRunningCopies("ex-derived-");
+  const target = resolveReviewTarget(cwd, { excludePatterns: [".claude", ".gemini"] });
+  const context = collectReviewContext(cwd, target, { excludePatterns: [".claude", ".gemini"] });
+
+  assert.equal(context.excludedFiles.length, 4);
+  assert.equal(context.reviewedFiles.length + context.excludedFiles.length, 6);
+  for (const file of context.excludedFiles) {
+    assert.match(file, /^\.(claude|gemini)\//);
+  }
+});
+
+// `*.md` matches at any depth in a git pathspec, which surprises people. An exclusion that
+// wide empties the working tree, and the review then silently falls back to a branch diff —
+// a different review from the one asked for. The flip has to be reported, not absorbed.
+test("exclusions wide enough to empty the working tree are reported", async () => {
+  const cwd = repoWithRunningCopies("ex-glob-");
+  const target = resolveReviewTarget(cwd, { excludePatterns: ["*.md"] });
+
+  assert.equal(target.mode, "branch", "nothing left uncommitted to review");
+  assert.equal(target.excludedAwayWorkingTree, true);
+
+  const { renderReviewResult } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "Fine.", findings: [] }, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: target.label,
+      excludePatterns: ["*.md"],
+      excludedAwayWorkingTree: true
+    }
+  );
+  assert.match(output, /Warning: every uncommitted change was excluded by \*\.md/);
+  assert.match(output, /reviewed the branch diff instead of your working tree/);
+});
+
+// A normal exclusion leaves work behind, so no flip and no warning.
+test("a partial exclusion keeps the working-tree review", () => {
+  const cwd = repoWithRunningCopies("ex-partial-");
+  const target = resolveReviewTarget(cwd, { excludePatterns: [".claude", ".gemini"] });
+
+  assert.equal(target.mode, "working-tree");
+  assert.ok(!target.excludedAwayWorkingTree);
+});

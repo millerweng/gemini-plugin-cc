@@ -419,8 +419,19 @@ function appendReviewedFilesSection(lines, meta) {
   const reviewed = Array.isArray(meta.reviewedFiles) ? meta.reviewedFiles : [];
   const omitted = Array.isArray(meta.omittedFiles) ? meta.omittedFiles : [];
 
-  if (Array.isArray(meta.excludePatterns) && meta.excludePatterns.length > 0) {
-    lines.push("", `Skipped by configuration: ${meta.excludePatterns.join(", ")}`);
+  // Two ways a file can be absent from the reviewed list, and they call for opposite
+  // reactions: this one was held back on purpose and needs no follow-up, while the
+  // truncation list below is evidence the review never got. Naming both, with counts,
+  // is what stops a deliberately narrow review from reading as a coverage gap.
+  const excludePatterns = Array.isArray(meta.excludePatterns) ? meta.excludePatterns : [];
+  if (excludePatterns.length > 0) {
+    const excluded = Array.isArray(meta.excludedFiles) ? meta.excludedFiles : [];
+    const scale = excluded.length > 0 ? `${excluded.length} changed file(s)` : "no changed files";
+    lines.push(
+      "",
+      `Deliberately excluded: ${excludePatterns.join(", ")} — ${scale} held back by configuration.`,
+      "This is a chosen scope, not a coverage gap. Do not report it as something the review missed."
+    );
   }
 
   lines.push("", `Files reviewed (${reviewed.length}):`);
@@ -569,6 +580,15 @@ export function renderReviewResult(parsedResult, meta) {
   if (meta.baseRef && meta.baseWasDetected && Number.isFinite(meta.fileCount) && meta.fileCount > 40) {
     lines.push(
       `Warning: base \`${meta.baseRef}\` was auto-detected and the range covers ${meta.fileCount} files${meta.mergeBase ? ` since merge-base ${meta.mergeBase.slice(0, 8)}` : ""}. If that is wider than the change you meant to review, rerun with \`--base <ref>\`, or set a default once with \`/gemini:setup --set-review-base <ref>\`.`,
+      ""
+    );
+  }
+
+  // Exclusions wide enough to empty the working tree silently turned "review my changes"
+  // into a branch diff. That is a different review from the one that was asked for.
+  if (meta.excludedAwayWorkingTree) {
+    lines.push(
+      `Warning: every uncommitted change was excluded by ${(meta.excludePatterns ?? []).join(", ") || "the configured exclusions"}, so this reviewed the branch diff instead of your working tree. Narrow the exclusions, or pass \`--no-exclude\`, if that is not what you wanted.`,
       ""
     );
   }

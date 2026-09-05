@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.12.0
+
+- A `--show-files` report names the exclusions as a chosen scope. 1.11.0 printed the
+  patterns and nothing else, which sat next to `Files NOT reviewed` and read like the same
+  kind of absence. It now gives the patterns, how many changed files they held back, and a
+  line saying it is not a coverage gap — the two lists call for opposite reactions, and the
+  caller has to be able to tell them apart.
+- The excluded file count is derived by listing without the pathspecs and subtracting,
+  rather than assumed from the patterns, so a glob that matched more than its author
+  expected shows up as a number instead of vanishing.
+- Exclusions wide enough to empty the working tree are reported. Excluding every
+  uncommitted change makes the tree look clean, which silently turns "review my changes"
+  into a branch diff — and if the branch is clean too, into a review of nothing. Git
+  pathspec globs match at any depth, so `*.md` reaches this on an ordinary repository.
+- Both review commands are told to state the excluded scope and never count it toward what
+  the review missed.
+
 ## 1.11.1
 
 - Both READMEs say why restarting after an upgrade is not optional. A session resolves the

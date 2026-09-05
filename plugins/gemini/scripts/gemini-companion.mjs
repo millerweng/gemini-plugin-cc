@@ -713,6 +713,8 @@ async function executeReviewRun(request) {
       diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
       excludePatterns: context.excludePatterns,
+      excludedFiles: context.excludedFiles,
+      excludedAwayWorkingTree: Boolean(context.target.excludedAwayWorkingTree),
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,
@@ -878,6 +880,8 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
       excludePatterns: context.excludePatterns,
+      excludedFiles: context.excludedFiles,
+      excludedAwayWorkingTree: Boolean(context.target.excludedAwayWorkingTree),
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,

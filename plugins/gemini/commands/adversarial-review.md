@@ -81,6 +81,7 @@ Coverage reporting:
 - Then name a narrower rerun in that same sentence: a tighter `--base <ref>`, or `--scope working-tree` when only the uncommitted change matters. Add `--show-files` to it, which prints two explicit lists — the files the review covered, and the files it never saw.
 - Write all of that as plain sentences in your reply. The run is finished, so there is nothing left to decide this turn and no question to open — whether to rerun is the user's call in their next message.
 - A workspace can have those lists on for every review (`/gemini:setup --enable-show-files`), in which case they appear without the flag. `--hide-files` silences one such run.
+- A `Deliberately excluded:` line in that report is a chosen scope, not a coverage gap. It names the patterns and how many changed files they held back. State it as the scope the review ran under, and never count it toward what the review missed — `Files NOT reviewed` is the only list that means evidence the review never got.
 - With no `Warning:` line, return the output verbatim and add nothing.
 
 Foreground flow:

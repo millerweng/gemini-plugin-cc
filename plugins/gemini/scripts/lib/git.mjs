@@ -258,7 +258,15 @@ export function resolveReviewTarget(cwd, options = {}) {
   // Excluded paths must not make the tree look dirty. A repository whose only uncommitted
   // change is an excluded copy of itself has nothing to review in the working tree, and
   // should fall through to the branch diff rather than review an empty change.
-  const state = getWorkingTreeState(cwd, { excludePatterns: options.excludePatterns ?? [] });
+  //
+  // That fallback is worth naming, though: exclusions wide enough to empty the working
+  // tree turn "review my changes" into a branch diff the user never asked for, and if the
+  // branch is also clean the review covers nothing at all. Silently reviewing nothing is
+  // the failure this whole path exists to prevent, so the flip is recorded on the target.
+  const excludePatterns = options.excludePatterns ?? [];
+  const state = getWorkingTreeState(cwd, { excludePatterns });
+  const excludedAwayWorkingTree =
+    excludePatterns.length > 0 && !state.isDirty && getWorkingTreeState(cwd).isDirty;
   const supportedScopes = new Set(["auto", "working-tree", "branch"]);
 
   if (baseRef) {
@@ -307,7 +315,8 @@ export function resolveReviewTarget(cwd, options = {}) {
     mode: "branch",
     label: `branch diff against ${branchBase}`,
     baseRef: branchBase,
-    explicit: Boolean(defaultBase)
+    explicit: Boolean(defaultBase),
+    excludedAwayWorkingTree
   };
 }
 
@@ -613,6 +622,25 @@ export function measureReviewScope(cwd, target, options = {}) {
   };
 }
 
+// The changed files the exclusions removed. Derived by listing without the pathspecs and
+// subtracting, so it stays correct however the patterns are written — a glob that matches
+// more than the author expected shows up here rather than silently vanishing.
+function listExcludedFiles(repoRoot, target, includedFiles) {
+  const included = new Set(includedFiles);
+  let allChanged;
+  if (target.mode === "working-tree") {
+    const state = getWorkingTreeState(repoRoot);
+    allChanged = listUniqueFiles(state.staged, state.unstaged, state.untracked);
+  } else {
+    const comparison = buildBranchComparison(repoRoot, target.baseRef);
+    allChanged = gitChecked(repoRoot, ["diff", "--name-only", comparison.commitRange])
+      .stdout.trim()
+      .split("\n")
+      .filter(Boolean);
+  }
+  return allChanged.filter((file) => !included.has(file));
+}
+
 export function collectReviewContext(cwd, target, options = {}) {
   const repoRoot = getRepoRoot(cwd);
   const currentBranch = getCurrentBranch(repoRoot);
@@ -649,6 +677,12 @@ export function collectReviewContext(cwd, target, options = {}) {
     });
   }
 
+  // Held back on purpose, and counted separately from everything else. A reader who sees
+  // only "4 files reviewed" cannot tell a deliberately narrowed review from one that lost
+  // 18 files to truncation, and those two call for opposite reactions.
+  const excludedFiles =
+    excludePatterns.length > 0 ? listExcludedFiles(repoRoot, target, details.changedFiles) : [];
+
   // What changed is not what was reviewed. A truncated diff drops whole files, and an
   // untracked file can be skipped for its size or its type — so the reviewed set is the
   // changed set minus everything that never made it into the prompt.
@@ -668,6 +702,7 @@ export function collectReviewContext(cwd, target, options = {}) {
     // against a 256 KB budget got described as "257 KB of diff".
     diffBytesExact,
     excludePatterns,
+    excludedFiles,
     // The budget that produced this inputMode. The report names it so a truncated review
     // says which limit it hit, not just that it hit one.
     maxInlineDiffBytes,

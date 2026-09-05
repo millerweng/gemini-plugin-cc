@@ -224,7 +224,16 @@ needed:
 Patterns are paths or globs relative to the repository root, and a directory takes its
 whole subtree with it. A bare glob matches at any depth, so `*.md` skips
 `docs/notes.md` too. `--exclude <paths>` sets them for one run and `--no-exclude` reviews
-everything despite the setting; a report that skipped anything says so above the file list.
+everything despite the setting.
+
+With `--show-files` on, a report that skipped anything names the patterns and how many
+changed files they held back, and says it is a chosen scope rather than something the
+review missed — so a narrowed review does not read as a coverage gap. Truncated files stay
+in their own list, which is the one that means missing evidence.
+
+If the exclusions are wide enough to leave no uncommitted change at all, the review falls
+back to the branch diff and the report says so. That is the case where a too-broad glob
+would otherwise review nothing without a word.
 
 **Raise the diff budget.** Past 256 KB a review sends a partial diff. Raise the ceiling
 when your changes routinely run larger:
