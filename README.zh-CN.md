@@ -72,6 +72,7 @@
 | `--show-reasoning` | 输出里带上 Gemini 的推理过程 |
 | `--show-files` | 列出这次 review 实际覆盖了哪些文件，以及哪些没覆盖到 |
 | `--max-diff-bytes <size>` | 只对这次抬高截断上限（`512kb`、`1mb`，或者直接给字节数）|
+| `--exclude <paths>` / `--no-exclude` | 只对这次跳过这些路径，或者无视配置把全部内容都 review |
 | `--progress` | 输出被重定向时也打印进度行 |
 | `--wait` / `--background` | 前台跑，或者转后台 |
 
@@ -184,6 +185,20 @@ ref 在设置时就解析，写错了当场报错。
 每个 git worktree 是独立的 workspace。worktree 自己没设 base，就继承主 checkout 的。
 
 固定的 base 只在做 branch review 时提供 ref。有未提交改动时，还是优先 review 未提交的部分。
+
+**跳过某些路径。** 仓库里同时放着自己的安装副本时，同一份源码会被 review 两三遍，
+而这些副本吃掉的正是原件需要的 diff 预算：
+
+```bash
+/gemini:setup --set-exclude .claude,.gemini   # 用 --clear-exclude 撤销
+```
+
+写相对仓库根目录的路径或 glob。写目录名会连整棵子树一起跳过。
+
+注意 glob 是跨层匹配的：`*.md` 会把 `docs/notes.md` 也跳过。
+
+`--exclude <paths>` 只对单次生效，`--no-exclude` 则无视配置把全部内容都 review。
+报告里跳过了东西时，会在文件清单上方写明。
 
 **抬高 diff 预算。** 超过 256 KB 的 review 只会发一部分 diff。改动经常更大的话可以调高：
 

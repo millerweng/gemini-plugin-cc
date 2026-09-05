@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini code review against local git state. Use when the user asks for a Gemini review by name — "gemini review", "review with gemini", "have Gemini look at this". Review-only; it never edits code.
-argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [--exclude <paths>|--no-exclude] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 
@@ -33,6 +33,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" review-scope --json $A
 - `willTruncate: false` means the whole diff fits. Say nothing about size and carry on.
 - `willTruncate: true` means some files would not be reviewed at all. The report names `heaviestFiles`, `diffBytesLabel`, and the budget in force — use those words rather than a number of your own.
 - Generated and copied files are the usual cause while the real change stays small: an installed plugin copy under `.claude`, build output, a lockfile. `heaviestFiles` names them.
+- When they are duplicates of source that is already in the diff, skipping them beats raising the budget — reviewing the same file twice costs the budget the original needed. `--exclude .claude,.gemini` skips them for this run; `/gemini:setup --set-exclude .claude,.gemini` skips them for every run. `excludePatterns` in the scope output says what is already being skipped.
 - Then carry two recommended options into the `AskUserQuestion` below, on top of wait and background: rerun with a tighter `--base <ref>`, and rerun with `--max-diff-bytes <size>` to raise the budget for this run. Name the heaviest paths in the question so the choice is informed.
 - Raising the budget for good is `/gemini:setup --set-max-diff-bytes <size>`. Mention it once, and raise a step at a time — a much larger prompt can spend the whole turn on reasoning and return nothing.
 

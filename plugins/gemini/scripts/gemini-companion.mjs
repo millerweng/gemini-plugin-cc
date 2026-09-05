@@ -41,7 +41,9 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   formatDiffByteBudget,
   parseDiffByteBudget,
+  parseExcludePatterns,
   resolveConfiguredReviewBase,
+  resolveExcludePatterns,
   resolveMaxInlineDiffBytes,
   resolveShowReviewFiles
 } from "./lib/review-config.mjs";
@@ -226,6 +228,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const reviewBase = resolveConfiguredReviewBase(cwd, workspaceRoot);
   const showReviewFiles = resolveShowReviewFiles(cwd, workspaceRoot);
   const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot);
+  const excludes = resolveExcludePatterns(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -254,6 +257,9 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     showReviewFiles: showReviewFiles.enabled,
     showReviewFilesSource: showReviewFiles.source,
     showReviewFilesInheritedFrom: showReviewFiles.inheritedFrom,
+    excludePaths: excludes.patterns,
+    excludePathsSource: excludes.source,
+    excludePathsInheritedFrom: excludes.inheritedFrom,
     maxInlineDiffBytes: diffBudget.bytes,
     maxInlineDiffBytesLabel: formatDiffByteBudget(diffBudget.bytes),
     maxInlineDiffBytesSource: diffBudget.source,
@@ -322,6 +328,25 @@ function buildSetupInitPrompts(cwd, report) {
       ]
     },
     {
+      key: "excludePaths",
+      header: "Skip paths",
+      question: "Any directories reviews should skip entirely?",
+      current: report.excludePaths.length > 0 ? report.excludePaths.join(", ") : "nothing skipped",
+      freeText: "Comma-separated paths or globs relative to the repository root. Applies as `--set-exclude <paths>`.",
+      options: [
+        {
+          label: "Skip nothing",
+          description: "Every changed file is in scope.",
+          apply: "--clear-exclude"
+        },
+        {
+          label: "Skip .claude and .gemini",
+          description: "A repository that also carries an installed copy of itself reviews the same source two or three times, and the duplicates spend the diff budget the real source needed.",
+          apply: "--set-exclude .claude,.gemini"
+        }
+      ]
+    },
+    {
       key: "maxInlineDiffBytes",
       header: "Diff budget",
       question: "How much diff should a review send before it starts truncating?",
@@ -363,7 +388,7 @@ function buildSetupInitPrompts(cwd, report) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes"],
+    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes", "set-exclude"],
     booleanOptions: [
       "json",
       "verify",
@@ -373,6 +398,7 @@ async function handleSetup(argv) {
       "enable-show-files",
       "disable-show-files",
       "clear-max-diff-bytes",
+      "clear-exclude",
       "init"
     ],
     // No free-text arguments here, so an unrecognised flag is a mistake, not content.
@@ -390,6 +416,9 @@ async function handleSetup(argv) {
   }
   if (options["set-max-diff-bytes"] && options["clear-max-diff-bytes"]) {
     throw new Error("Choose either --set-max-diff-bytes <n> or --clear-max-diff-bytes.");
+  }
+  if (options["set-exclude"] && options["clear-exclude"]) {
+    throw new Error("Choose either --set-exclude <paths> or --clear-exclude.");
   }
 
   const cwd = resolveCommandCwd(options);
@@ -420,6 +449,18 @@ async function handleSetup(argv) {
   } else if (options["clear-review-base"]) {
     setConfig(workspaceRoot, "reviewBase", null);
     actionsTaken.push(`Cleared the default review base for ${workspaceRoot}; auto-detection applies again.`);
+  }
+
+  if (options["set-exclude"]) {
+    const patterns = parseExcludePatterns(options["set-exclude"]);
+    if (patterns.length === 0) {
+      throw new Error("--set-exclude needs at least one path. Use --clear-exclude to review everything.");
+    }
+    setConfig(workspaceRoot, "excludePaths", patterns);
+    actionsTaken.push(`Reviews in ${workspaceRoot} now skip: ${patterns.join(", ")}.`);
+  } else if (options["clear-exclude"]) {
+    setConfig(workspaceRoot, "excludePaths", null);
+    actionsTaken.push(`Cleared the review exclusions for ${workspaceRoot}; every changed file is in scope again.`);
   }
 
   if (options["set-max-diff-bytes"]) {
@@ -605,7 +646,8 @@ async function executeReviewRun(request) {
 
   const target = resolveReviewTarget(request.cwd, {
     base: request.base,
-    scope: request.scope
+    scope: request.scope,
+    excludePatterns: request.excludePatterns
   });
   // Where the base came from decides whether a wide range is worth warning about. The
   // caller knows; re-resolving here would lose it and every base would look detected.
@@ -614,7 +656,8 @@ async function executeReviewRun(request) {
   const reviewName = request.reviewName ?? "Review";
 
   const context = collectReviewContext(request.cwd, target, {
-    maxInlineDiffBytes: request.maxInlineDiffBytes
+    maxInlineDiffBytes: request.maxInlineDiffBytes,
+    excludePatterns: request.excludePatterns
   });
 
   const lensIds = Array.isArray(request.lensIds) && request.lensIds.length > 0 ? request.lensIds : null;
@@ -669,6 +712,7 @@ async function executeReviewRun(request) {
       omittedFiles: context.omittedFiles,
       diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
+      excludePatterns: context.excludePatterns,
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,
@@ -833,6 +877,7 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       omittedFiles: context.omittedFiles,
       diffBytesExact: context.diffBytesExact,
       maxInlineDiffBytes: context.maxInlineDiffBytes,
+      excludePatterns: context.excludePatterns,
       // Pre-formatted so render.mjs stays a pure formatting module with no imports.
       maxInlineDiffBytesLabel: formatDiffByteBudget(context.maxInlineDiffBytes),
       inputMode: context.inputMode,
@@ -1128,8 +1173,8 @@ function enqueueBackgroundTask(cwd, job, request) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes"],
-    booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "progress"],
+    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes", "exclude"],
+    booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "no-exclude", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
   });
@@ -1147,6 +1192,10 @@ async function handleReviewCommand(argv, config) {
   const focusText = positionals.join(" ").trim();
   // A configured base is a deliberate choice for this workspace, so it counts as
   // explicit and is not second-guessed the way auto-detection is.
+  const excludes = resolveExcludePatterns(cwd, workspaceRoot, {
+    flagValue: options.exclude,
+    noExcludeFlag: Boolean(options["no-exclude"])
+  });
   const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
   // The workspace setting decides this unless the run says otherwise, so a repository can
   // turn covered-file reporting on once instead of remembering the flag every time.
@@ -1160,7 +1209,8 @@ async function handleReviewCommand(argv, config) {
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     defaultBase: configuredBase,
-    scope: options.scope
+    scope: options.scope,
+    excludePatterns: excludes.patterns
   });
   target.baseSource = options.base ? "flag" : target.baseRef && configuredBase ? "config" : "detected";
 
@@ -1187,6 +1237,7 @@ async function handleReviewCommand(argv, config) {
         showReasoning: Boolean(options["show-reasoning"]),
         showFiles: showFiles.enabled,
         maxInlineDiffBytes: diffBudget.bytes,
+        excludePatterns: excludes.patterns,
         lensIds,
         onProgress: progress
       }),
@@ -1201,31 +1252,40 @@ async function handleReviewCommand(argv, config) {
 // rather than compute.
 async function handleReviewScope(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "cwd", "max-diff-bytes"],
-    booleanOptions: ["json"],
+    valueOptions: ["base", "scope", "cwd", "max-diff-bytes", "exclude"],
+    booleanOptions: ["json", "no-exclude"],
     rejectUnknownOptions: true
   });
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
+  const excludes = resolveExcludePatterns(cwd, workspaceRoot, {
+    flagValue: options.exclude,
+    noExcludeFlag: Boolean(options["no-exclude"])
+  });
   const { base: configuredBase } = resolveConfiguredReviewBase(cwd, workspaceRoot);
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     defaultBase: configuredBase,
-    scope: options.scope
+    scope: options.scope,
+    excludePatterns: excludes.patterns
   });
   target.baseSource = options.base ? "flag" : target.baseRef && configuredBase ? "config" : "detected";
 
   const budget = resolveMaxInlineDiffBytes(cwd, workspaceRoot, {
     flagValue: options["max-diff-bytes"]
   });
-  const scope = measureReviewScope(cwd, target, { maxInlineDiffBytes: budget.bytes });
+  const scope = measureReviewScope(cwd, target, {
+    maxInlineDiffBytes: budget.bytes,
+    excludePatterns: excludes.patterns
+  });
 
   const payload = {
     ...scope,
     diffBytesLabel: `${scope.diffBytesExact ? "" : "at least "}${formatDiffByteBudget(scope.diffBytes)}`,
     maxInlineDiffBytesLabel: formatDiffByteBudget(scope.maxInlineDiffBytes),
     maxInlineDiffBytesSource: budget.source,
+    excludePatternsSource: excludes.source,
     targetLabel: target.label
   };
   outputCommandResult(payload, renderReviewScopeReport(payload), options.json);

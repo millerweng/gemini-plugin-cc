@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.11.0
+
+- Reviews can skip paths. `/gemini:setup --set-exclude .claude,.gemini` keeps them out of
+  every review in a workspace, `--exclude <paths>` does it for one run, and `--no-exclude`
+  reviews everything despite the setting. `--init` asks about it, with `.claude,.gemini`
+  offered as the ready-made answer.
+- The case this is for: a repository that also carries an installed copy of itself. One
+  report listed 29 reviewed files where 18 were `.claude/` and `.gemini/` duplicates of the
+  4 real sources — the same content reviewed three times, spending the diff budget the
+  original needed. Skipping duplicates beats raising the budget, because the budget was
+  never the problem.
+- Exclusions reach every git call that feeds a review, not just the diff: the file lists,
+  the status, the diffstat, the commit log, the byte measurement, and `ls-files --others`,
+  so an excluded untracked file is not sent as content either.
+- An excluded change no longer makes the working tree look dirty. A repository whose only
+  uncommitted change is an excluded copy of itself now falls through to the branch diff
+  rather than reviewing an empty working-tree change.
+- Pathspec magic is rejected in a stored pattern. `:(exclude)` is added by the code, and a
+  pattern carrying its own prefix could turn an exclusion into an inclusion — widening the
+  review while looking like it narrowed it. Absolute paths and `..` are refused for the
+  same reason. A pattern already broken in a settings file falls back to skipping nothing,
+  which reviews too much rather than too little.
+- A report that skipped anything says so above its file list.
+
 ## 1.10.0
 
 - The scope check asks instead of computing. Both review commands told Claude to run

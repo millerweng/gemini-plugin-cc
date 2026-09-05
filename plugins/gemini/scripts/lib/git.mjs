@@ -27,6 +27,22 @@ function gitChecked(cwd, args, options = {}) {
   return runCommandChecked("git", args, { cwd, ...options, shell: false });
 }
 
+/**
+ * Appends exclusion pathspecs so a command sees the repository minus the excluded paths.
+ * `:(top,exclude)<pattern>` drops the whole subtree, and every command here runs with cwd
+ * at the repository root, so patterns are root-relative.
+ *
+ * Not applied to `collectTruncatedDiff`, which passes one explicit file per call — the
+ * file list handed to it is already filtered, and a second `--` there would be a syntax
+ * error rather than a narrower diff.
+ */
+function withExcludes(args, excludePatterns = []) {
+  if (!excludePatterns || excludePatterns.length === 0) {
+    return args;
+  }
+  return [...args, "--", ":(top)", ...excludePatterns.map((pattern) => `:(top,exclude)${pattern}`)];
+}
+
 function listUniqueFiles(...groups) {
   return [...new Set(groups.flat().filter(Boolean))].sort();
 }
@@ -216,10 +232,11 @@ export function getCurrentBranch(cwd) {
   return gitChecked(cwd, ["branch", "--show-current"]).stdout.trim() || "HEAD";
 }
 
-export function getWorkingTreeState(cwd) {
-  const staged = gitChecked(cwd, ["diff", "--cached", "--name-only"]).stdout.trim().split("\n").filter(Boolean);
-  const unstaged = gitChecked(cwd, ["diff", "--name-only"]).stdout.trim().split("\n").filter(Boolean);
-  const untracked = gitChecked(cwd, ["ls-files", "--others", "--exclude-standard"]).stdout.trim().split("\n").filter(Boolean);
+export function getWorkingTreeState(cwd, options = {}) {
+  const ex = options.excludePatterns ?? [];
+  const staged = gitChecked(cwd, withExcludes(["diff", "--cached", "--name-only"], ex)).stdout.trim().split("\n").filter(Boolean);
+  const unstaged = gitChecked(cwd, withExcludes(["diff", "--name-only"], ex)).stdout.trim().split("\n").filter(Boolean);
+  const untracked = gitChecked(cwd, withExcludes(["ls-files", "--others", "--exclude-standard"], ex)).stdout.trim().split("\n").filter(Boolean);
 
   return {
     staged,
@@ -238,7 +255,10 @@ export function resolveReviewTarget(cwd, options = {}) {
   // like an explicit --base, or a dirty tree would be reviewed as a branch diff and
   // every uncommitted change would be invisible.
   const defaultBase = options.defaultBase ?? null;
-  const state = getWorkingTreeState(cwd);
+  // Excluded paths must not make the tree look dirty. A repository whose only uncommitted
+  // change is an excluded copy of itself has nothing to review in the working tree, and
+  // should fall through to the branch diff rather than review an empty change.
+  const state = getWorkingTreeState(cwd, { excludePatterns: options.excludePatterns ?? [] });
   const supportedScopes = new Set(["auto", "working-tree", "branch"]);
 
   if (baseRef) {
@@ -373,14 +393,15 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
 
 function collectWorkingTreeContext(cwd, state, options = {}) {
   const includeDiff = options.includeDiff !== false;
-  const status = gitChecked(cwd, ["status", "--short", "--untracked-files=all"]).stdout.trim();
+  const ex = options.excludePatterns ?? [];
+  const status = gitChecked(cwd, withExcludes(["status", "--short", "--untracked-files=all"], ex)).stdout.trim();
   const changedFiles = listUniqueFiles(state.staged, state.unstaged, state.untracked);
 
   let parts;
   let omittedFiles;
   if (includeDiff) {
-    const stagedDiff = gitChecked(cwd, ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
-    const unstagedDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
+    const stagedDiff = gitChecked(cwd, withExcludes(["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
+    const unstagedDiff = gitChecked(cwd, withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
     const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
     omittedFiles = untracked.omitted;
     parts = [
@@ -390,8 +411,8 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
       formatSection("Untracked Files", untracked.body)
     ];
   } else {
-    const stagedStat = gitChecked(cwd, ["diff", "--shortstat", "--cached"]).stdout.trim();
-    const unstagedStat = gitChecked(cwd, ["diff", "--shortstat"]).stdout.trim();
+    const stagedStat = gitChecked(cwd, withExcludes(["diff", "--shortstat", "--cached"], ex)).stdout.trim();
+    const unstagedStat = gitChecked(cwd, withExcludes(["diff", "--shortstat"], ex)).stdout.trim();
     const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
     const tracked = listUniqueFiles(state.staged, state.unstaged);
     const truncated = collectTruncatedDiff(
@@ -424,9 +445,12 @@ function collectBranchContext(cwd, baseRef, options = {}) {
   const includeDiff = options.includeDiff !== false;
   const comparison = options.comparison ?? buildBranchComparison(cwd, baseRef);
   const currentBranch = getCurrentBranch(cwd);
-  const changedFiles = gitChecked(cwd, ["diff", "--name-only", comparison.commitRange]).stdout.trim().split("\n").filter(Boolean);
-  const logOutput = gitChecked(cwd, ["log", "--oneline", "--decorate", comparison.commitRange]).stdout.trim();
-  const diffStat = gitChecked(cwd, ["diff", "--stat", comparison.commitRange]).stdout.trim();
+  const ex = options.excludePatterns ?? [];
+  const changedFiles = gitChecked(cwd, withExcludes(["diff", "--name-only", comparison.commitRange], ex)).stdout.trim().split("\n").filter(Boolean);
+  // Excluded from the log too, so a commit that only touched excluded paths does not show
+  // up as unexplained history beside a diff that never mentions it.
+  const logOutput = gitChecked(cwd, withExcludes(["log", "--oneline", "--decorate", comparison.commitRange], ex)).stdout.trim();
+  const diffStat = gitChecked(cwd, withExcludes(["diff", "--stat", comparison.commitRange], ex)).stdout.trim();
 
   // Assigned by the truncated branch below; an inline diff omits nothing.
   let omittedFiles = [];
@@ -437,7 +461,7 @@ function collectBranchContext(cwd, baseRef, options = {}) {
           formatSection("Diff Stat", diffStat),
           formatSection(
             "Branch Diff",
-            gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange]).stdout
+            gitChecked(cwd, withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange], ex)).stdout
           )
         ].join("\n")
       : (() => {
@@ -500,6 +524,7 @@ const SCOPE_PROBE_BYTES = 256 * 1024 * 1024;
 export function measureReviewDiff(repoRoot, target, options = {}) {
   const maxInlineDiffBytes = normalizeMaxInlineDiffBytes(options.maxInlineDiffBytes);
   const ceiling = Math.max(maxInlineDiffBytes, options.probeBytes ?? 0);
+  const ex = options.excludePatterns ?? [];
 
   let diffBytes;
   let comparison = null;
@@ -507,8 +532,8 @@ export function measureReviewDiff(repoRoot, target, options = {}) {
     diffBytes = measureCombinedGitOutputBytes(
       repoRoot,
       [
-        ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"],
-        ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]
+        withExcludes(["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"], ex),
+        withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff"], ex)
       ],
       ceiling
     );
@@ -516,7 +541,7 @@ export function measureReviewDiff(repoRoot, target, options = {}) {
     comparison = options.comparison ?? buildBranchComparison(repoRoot, target.baseRef);
     diffBytes = measureGitOutputBytes(
       repoRoot,
-      ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
+      withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange], ex),
       ceiling
     );
   }
@@ -542,10 +567,13 @@ export function measureReviewScope(cwd, target, options = {}) {
     probeBytes: SCOPE_PROBE_BYTES
   });
 
-  const numstatArgs =
+  const ex = options.excludePatterns ?? [];
+  const numstatArgs = withExcludes(
     target.mode === "working-tree"
       ? ["diff", "--numstat", "HEAD"]
-      : ["diff", "--numstat", measured.comparison.commitRange];
+      : ["diff", "--numstat", measured.comparison.commitRange],
+    ex
+  );
   const heaviestFiles = gitChecked(repoRoot, numstatArgs)
     .stdout.trim()
     .split("\n")
@@ -558,11 +586,12 @@ export function measureReviewScope(cwd, target, options = {}) {
     })
     .sort((left, right) => right.churn - left.churn);
 
-  const state = target.mode === "working-tree" ? getWorkingTreeState(repoRoot) : null;
+  const state =
+    target.mode === "working-tree" ? getWorkingTreeState(repoRoot, { excludePatterns: ex }) : null;
   const changedFiles =
     target.mode === "working-tree"
       ? listUniqueFiles(state.staged, state.unstaged, state.untracked)
-      : gitChecked(repoRoot, ["diff", "--name-only", measured.comparison.commitRange])
+      : gitChecked(repoRoot, withExcludes(["diff", "--name-only", measured.comparison.commitRange], ex))
           .stdout.trim()
           .split("\n")
           .filter(Boolean);
@@ -578,6 +607,7 @@ export function measureReviewScope(cwd, target, options = {}) {
     diffBytesExact: measured.exact,
     maxInlineDiffBytes: measured.maxInlineDiffBytes,
     willTruncate: measured.willTruncate,
+    excludePatterns: ex,
     untrackedCount: state ? state.untracked.length : 0,
     mergeBase: measured.comparison?.mergeBase ?? null
   };
@@ -587,29 +617,36 @@ export function collectReviewContext(cwd, target, options = {}) {
   const repoRoot = getRepoRoot(cwd);
   const currentBranch = getCurrentBranch(repoRoot);
   const maxInlineDiffBytes = normalizeMaxInlineDiffBytes(options.maxInlineDiffBytes);
+  const excludePatterns = options.excludePatterns ?? [];
   let details;
   let includeDiff;
   let diffBytes;
   let diffBytesExact;
 
   if (target.mode === "working-tree") {
-    const state = getWorkingTreeState(repoRoot);
-    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes });
+    const state = getWorkingTreeState(repoRoot, { excludePatterns });
+    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes, excludePatterns });
     diffBytes = measured.diffBytes;
     diffBytesExact = measured.exact;
     includeDiff = options.includeDiff ?? !measured.willTruncate;
     details = collectWorkingTreeContext(repoRoot, state, {
       includeDiff,
       maxInlineDiffBytes,
+      excludePatterns,
       maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes
     });
   } else {
     const comparison = buildBranchComparison(repoRoot, target.baseRef);
-    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes, comparison });
+    const measured = measureReviewDiff(repoRoot, target, { maxInlineDiffBytes, comparison, excludePatterns });
     diffBytes = measured.diffBytes;
     diffBytesExact = measured.exact;
     includeDiff = options.includeDiff ?? !measured.willTruncate;
-    details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison, maxInlineDiffBytes });
+    details = collectBranchContext(repoRoot, target.baseRef, {
+      includeDiff,
+      comparison,
+      maxInlineDiffBytes,
+      excludePatterns
+    });
   }
 
   // What changed is not what was reviewed. A truncated diff drops whole files, and an
@@ -630,6 +667,7 @@ export function collectReviewContext(cwd, target, options = {}) {
     // rather than the real size. Reporting it as exact is how a 5 MB diff measured
     // against a 256 KB budget got described as "257 KB of diff".
     diffBytesExact,
+    excludePatterns,
     // The budget that produced this inputMode. The report names it so a truncated review
     // says which limit it hit, not just that it hit one.
     maxInlineDiffBytes,

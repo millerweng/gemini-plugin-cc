@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { DEFAULT_INLINE_DIFF_MAX_BYTES, getMainWorktreeRoot } from "./git.mjs";
 import { getConfig } from "./state.mjs";
 
@@ -108,4 +110,70 @@ export function resolveMaxInlineDiffBytes(cwd, workspaceRoot, options = {}) {
     return { bytes: DEFAULT_INLINE_DIFF_MAX_BYTES, source: "default", inheritedFrom: null };
   }
   return { bytes: Math.floor(parsed), source: "config", inheritedFrom };
+}
+
+// Paths kept out of every diff the review sees. The case this exists for is a source tree
+// that also carries an installed copy of itself — `.claude/` and `.gemini/` plugin copies,
+// vendored bundles, build output. Those triple the file count, and because the budget is
+// spent on them the real source is what gets truncated away.
+const MAX_EXCLUDE_PATTERNS = 64;
+
+/**
+ * Patterns are plain paths or globs relative to the repository root — `.claude`, `dist`,
+ * `*.lock`. Git pathspec magic is rejected rather than passed through: `:(exclude)` is
+ * added here, and letting a stored pattern carry its own prefix would let one turn into
+ * an include and quietly widen the review instead of narrowing it.
+ */
+export function parseExcludePatterns(input) {
+  const raw = Array.isArray(input) ? input : String(input ?? "").split(",");
+  const patterns = [];
+
+  for (const entry of raw) {
+    const pattern = String(entry ?? "").trim().replace(/\/+$/, "");
+    if (!pattern) {
+      continue;
+    }
+    if (pattern.startsWith(":")) {
+      throw new Error(`Git pathspec magic is not allowed in an exclude pattern: ${pattern}`);
+    }
+    if (path.isAbsolute(pattern) || pattern.startsWith("~")) {
+      throw new Error(`An exclude pattern must be relative to the repository root: ${pattern}`);
+    }
+    if (pattern.split("/").includes("..")) {
+      throw new Error(`An exclude pattern must stay inside the repository: ${pattern}`);
+    }
+    if (!patterns.includes(pattern)) {
+      patterns.push(pattern);
+    }
+  }
+
+  if (patterns.length > MAX_EXCLUDE_PATTERNS) {
+    throw new Error(`At most ${MAX_EXCLUDE_PATTERNS} exclude patterns, got ${patterns.length}.`);
+  }
+  return patterns;
+}
+
+export function resolveExcludePatterns(cwd, workspaceRoot, options = {}) {
+  if (options.noExcludeFlag) {
+    return { patterns: [], source: "flag", inheritedFrom: null };
+  }
+  if (options.flagValue !== undefined && options.flagValue !== null && options.flagValue !== false) {
+    return { patterns: parseExcludePatterns(options.flagValue), source: "flag", inheritedFrom: null };
+  }
+
+  const { value, inheritedFrom } = resolveInheritedConfigValue(cwd, workspaceRoot, "excludePaths");
+  if (value === null) {
+    return { patterns: [], source: "default", inheritedFrom: null };
+  }
+  try {
+    // Runs on every review, so a hand-edited settings file degrades to "exclude nothing"
+    // rather than breaking the command. Excluding nothing is the safe direction: it
+    // reviews too much, never too little.
+    const patterns = parseExcludePatterns(value);
+    return patterns.length > 0
+      ? { patterns, source: "config", inheritedFrom }
+      : { patterns: [], source: "default", inheritedFrom: null };
+  } catch {
+    return { patterns: [], source: "default", inheritedFrom: null };
+  }
 }

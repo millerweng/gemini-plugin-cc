@@ -74,6 +74,7 @@ Both review commands take the same flags and accept focus text after them.
 | `--show-reasoning` | Include Gemini's reasoning trace |
 | `--show-files` | List the files the review actually covered, and any it did not |
 | `--max-diff-bytes <size>` | Raise the truncation budget for this run (`512kb`, `1mb`, or raw bytes) |
+| `--exclude <paths>` / `--no-exclude` | Skip these paths for this run, or review everything despite the setting |
 | `--progress` | Stream progress lines even when output is captured |
 | `--wait` / `--background` | Foreground, or detach |
 
@@ -199,6 +200,19 @@ so a truncated run names what it missed without you remembering the flag:
 `--show-files` still turns it on for a single run, and `--hide-files` silences one run in a
 workspace where the setting is on. Worktrees inherit the setting the same way the review
 base does, and a worktree that turns it off stays off.
+
+**Skip paths.** A repository that also carries an installed copy of itself reviews the
+same source two or three times, and the duplicates spend the diff budget the original
+needed:
+
+```bash
+/gemini:setup --set-exclude .claude,.gemini   # --clear-exclude to undo
+```
+
+Patterns are paths or globs relative to the repository root, and a directory takes its
+whole subtree with it. A bare glob matches at any depth, so `*.md` skips
+`docs/notes.md` too. `--exclude <paths>` sets them for one run and `--no-exclude` reviews
+everything despite the setting; a report that skipped anything says so above the file list.
 
 **Raise the diff budget.** Past 256 KB a review sends a partial diff. Raise the ceiling
 when your changes routinely run larger:

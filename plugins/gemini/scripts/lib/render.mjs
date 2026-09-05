@@ -273,6 +273,9 @@ export function renderReviewScopeReport(report) {
     `Target: ${report.targetLabel}`,
     `Files changed: ${report.fileCount}`,
     `Diff size: ${report.diffBytesLabel}`,
+    ...(report.excludePatterns?.length > 0
+      ? [`Skipped paths: ${report.excludePatterns.join(", ")}`]
+      : []),
     `Budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ` (${report.maxInlineDiffBytesSource})`}`,
     ""
   ];
@@ -321,6 +324,7 @@ export function renderSetupReport(report) {
     `- auth: ${report.auth.detail}${report.auth.verified === true ? " (verified)" : report.auth.verified === false ? " (verification failed)" : " (unverified)"}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
+    `- skipped paths: ${report.excludePaths?.length > 0 ? report.excludePaths.join(", ") : "none"}${report.excludePathsInheritedFrom ? ` (inherited from ${report.excludePathsInheritedFrom})` : ""}`,
     `- diff budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ""}${report.maxInlineDiffBytesInheritedFrom ? ` (inherited from ${report.maxInlineDiffBytesInheritedFrom})` : ""}`,
     `- review base: ${report.reviewBase ?? "auto-detected"}${report.reviewBaseInheritedFrom ? ` (inherited from ${report.reviewBaseInheritedFrom})` : ""}`,
     `- covered-file list in reports: ${report.showReviewFiles ? "on" : "off"}${report.showReviewFilesSource === "default" ? " (default)" : ""}${report.showReviewFilesInheritedFrom ? ` (inherited from ${report.showReviewFilesInheritedFrom})` : ""}`,
@@ -414,6 +418,10 @@ function appendReviewedFilesSection(lines, meta) {
 
   const reviewed = Array.isArray(meta.reviewedFiles) ? meta.reviewedFiles : [];
   const omitted = Array.isArray(meta.omittedFiles) ? meta.omittedFiles : [];
+
+  if (Array.isArray(meta.excludePatterns) && meta.excludePatterns.length > 0) {
+    lines.push("", `Skipped by configuration: ${meta.excludePatterns.join(", ")}`);
+  }
 
   lines.push("", `Files reviewed (${reviewed.length}):`);
   if (reviewed.length === 0) {
