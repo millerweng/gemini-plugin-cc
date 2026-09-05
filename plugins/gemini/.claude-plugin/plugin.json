@@ -1,6 +1,6 @@
 {
   "name": "gemini",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "Use Gemini from Claude Code to review code or delegate tasks.",
   "author": {
     "name": "Momin Abrar Ghalib"

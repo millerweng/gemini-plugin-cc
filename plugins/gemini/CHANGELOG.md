@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.11.1
+
+- Both READMEs say why restarting after an upgrade is not optional. A session resolves the
+  plugin once at startup, so one opened before an upgrade keeps running the old copy and
+  reports a newly added flag as `Unknown option` — which reads as a broken flag rather than
+  a stale session. 1.9.1 put the version into that error but left the READMEs alone.
+- The install section points at `/gemini:setup --init` once the plugin is in, so the
+  workspace settings are reachable from the first thing a new user reads.
+
 ## 1.11.0
 
 - Reviews can skip paths. `/gemini:setup --set-exclude .claude,.gemini` keeps them out of

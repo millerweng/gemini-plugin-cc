@@ -35,6 +35,18 @@ and restart the session. Updates are compared by version number, so if an update
 to do, check that the marketplace advertises a higher version than
 `~/.claude/plugins/installed_plugins.json` records.
 
+**Restarting is not optional.** A session resolves the plugin once at startup and keeps that
+copy for its lifetime, so a session opened before an upgrade keeps running the old one. A flag
+added in the newer release then comes back as `Unknown option`, which reads like a broken flag
+rather than a stale session — the error names the version that answered, so check that number
+before assuming the flag is wrong.
+
+Then set the workspace up in one pass:
+
+```text
+/gemini:setup --init
+```
+
 ## Commands
 
 | Command | Purpose |
