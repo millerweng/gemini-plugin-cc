@@ -4,12 +4,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { setConfig } from "../plugins/gemini/scripts/lib/state.mjs";
+import { collectReviewContext, resolveReviewTarget } from "../plugins/gemini/scripts/lib/git.mjs";
 import {
   formatDiffByteBudget,
   parseDiffByteBudget,
   resolveConfiguredReviewBase,
   resolveMaxInlineDiffBytes,
-  resolveShowReviewFiles
+  resolveShowReviewFiles,
+  resolveUntrackedLimits
 } from "../plugins/gemini/scripts/lib/review-config.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
@@ -200,5 +202,90 @@ test("a corrupt stored budget falls back to the default instead of throwing", ()
       assert.equal(resolved.bytes, 256 * 1024, `stored ${JSON.stringify(bad)} should fall back`);
       assert.equal(resolved.source, "default");
     }
+  });
+});
+
+// An untracked file goes into the prompt whole, so it is capped separately from the diff
+// budget. 24 KB leaves an ordinary new source file out while the diff budget sits untouched.
+test("untracked limits default to 24 KB per file and 128 KB in total", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("unt-default-");
+    initGitRepo(repo);
+    const limits = resolveUntrackedLimits(repo, repo);
+    assert.equal(limits.perFile.bytes, 24 * 1024);
+    assert.equal(limits.total.bytes, 128 * 1024);
+    assert.equal(limits.perFile.source, "default");
+  });
+});
+
+test("raising the untracked limits lets a new source file through", () => {
+  const cwd = makeTempDir("unt-raise-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "seed.js"), "1;\n");
+  run("git", ["add", "."], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  fs.writeFileSync(path.join(cwd, "analyze.py"), "z".repeat(35 * 1024));
+
+  const target = resolveReviewTarget(cwd, {});
+  assert.deepEqual(collectReviewContext(cwd, target, {}).omittedFiles, ["analyze.py"]);
+  assert.deepEqual(
+    collectReviewContext(cwd, target, {
+      maxUntrackedBytes: 128 * 1024,
+      maxAggregateUntrackedBytes: 1024 * 1024
+    }).omittedFiles,
+    []
+  );
+});
+
+test("a flag outranks the workspace setting for untracked limits", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("unt-flag-");
+    initGitRepo(repo);
+    setConfig(repo, "maxUntrackedBytes", 64 * 1024);
+    setConfig(repo, "maxUntrackedTotalBytes", 512 * 1024);
+
+    assert.equal(resolveUntrackedLimits(repo, repo).perFile.bytes, 64 * 1024);
+    const flagged = resolveUntrackedLimits(repo, repo, { perFileFlag: "16kb" });
+    assert.equal(flagged.perFile.bytes, 16 * 1024);
+    assert.equal(flagged.perFile.source, "flag");
+  });
+});
+
+// A total under the per-file cap lets the first file take everything and starves the rest,
+// which reads as an arbitrary cut-off rather than a limit.
+test("a per-file limit above the total is rejected when set from a flag", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("unt-pair-");
+    initGitRepo(repo);
+    assert.throws(
+      () => resolveUntrackedLimits(repo, repo, { perFileFlag: "2mb", totalFlag: "1mb" }),
+      /cannot exceed the total/
+    );
+  });
+});
+
+// The same pair already stored must not fail every review, so it degrades to the defaults.
+test("an impossible stored pair falls back to the defaults", () => {
+  withPluginData(() => {
+    const repo = makeTempDir("unt-stored-");
+    initGitRepo(repo);
+    setConfig(repo, "maxUntrackedBytes", 2 * 1024 * 1024);
+    setConfig(repo, "maxUntrackedTotalBytes", 1024 * 1024);
+
+    const limits = resolveUntrackedLimits(repo, repo);
+    assert.equal(limits.perFile.bytes, 24 * 1024);
+    assert.equal(limits.total.bytes, 128 * 1024);
+    assert.equal(limits.perFile.source, "default");
+  });
+});
+
+test("a worktree inherits the untracked limits from the main checkout", () => {
+  withPluginData(() => {
+    const { main, linked } = makeRepoWithWorktree();
+    setConfig(main, "maxUntrackedBytes", 128 * 1024);
+    setConfig(main, "maxUntrackedTotalBytes", 1024 * 1024);
+    const limits = resolveUntrackedLimits(linked, linked);
+    assert.equal(limits.perFile.bytes, 128 * 1024);
+    assert.equal(limits.perFile.inheritedFrom, main);
   });
 });

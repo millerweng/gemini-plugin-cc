@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini review that challenges the implementation approach and design choices. Use when the user asks for an adversarial or challenge review by name — "gemini adversarial-review", "adversarial review", "challenge this approach". Review-only; it never edits code.
-argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [--exclude <paths>|--no-exclude] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [--exclude <paths>|--no-exclude] [--max-untracked-bytes <size>] [--max-untracked-total <size>] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 

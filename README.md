@@ -87,6 +87,8 @@ Both review commands take the same flags and accept focus text after them.
 | `--show-files` | List the files the review actually covered, and any it did not |
 | `--max-diff-bytes <size>` | Raise the truncation budget for this run (`512kb`, `1mb`, or raw bytes) |
 | `--exclude <paths>` / `--no-exclude` | Skip these paths for this run, or review everything despite the setting |
+| `--max-untracked-bytes <size>` | Raise the per-file limit on new (untracked) file content |
+| `--max-untracked-total <size>` | Raise the total limit on new file content |
 | `--progress` | Stream progress lines even when output is captured |
 | `--wait` / `--background` | Foreground, or detach |
 
@@ -228,8 +230,12 @@ whole subtree with it. A bare glob matches at any depth, so `*.md` skips
 everything despite the setting.
 
 An untracked file is sent as whole content rather than as a diff, under its own limits:
-24 KB per file and 128 KB in total. A new source file over 24 KB is therefore left out of
-the review even when the diff budget is nowhere near spent. Every file left out is listed
+24 KB per file and 128 KB in total by default. A new source file over 24 KB is therefore
+left out of the review even when the diff budget is nowhere near spent. Raise them per run
+with `--max-untracked-bytes 128kb --max-untracked-total 1mb`, or for the workspace with
+`/gemini:setup --set-max-untracked-bytes 128kb --set-max-untracked-total 1mb`
+(`--clear-untracked-limits` to undo). Whole-file content costs more prompt than a diff of
+the same change, so raise it a step at a time. Every file left out is listed
 with the reason — the size cap, a spent diff budget, a binary file — so a gap in the
 reviewed list never has to be guessed at.
 

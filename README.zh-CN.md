@@ -85,6 +85,8 @@
 | `--show-files` | 列出这次 review 实际覆盖了哪些文件，以及哪些没覆盖到 |
 | `--max-diff-bytes <size>` | 只对这次抬高截断上限（`512kb`、`1mb`，或者直接给字节数）|
 | `--exclude <paths>` / `--no-exclude` | 只对这次跳过这些路径，或者无视配置把全部内容都 review |
+| `--max-untracked-bytes <size>` | 抬高新增（untracked）文件的单文件上限 |
+| `--max-untracked-total <size>` | 抬高新增文件的总量上限 |
 | `--progress` | 输出被重定向时也打印进度行 |
 | `--wait` / `--background` | 前台跑，或者转后台 |
 
@@ -214,10 +216,16 @@ ref 在设置时就解析，写错了当场报错。
 `--exclude <paths>` 只对单次生效，`--no-exclude` 则无视配置把全部内容都 review。
 
 untracked 文件是整份内容发过去的，不是 diff，所以有自己的一套上限：
-单个文件 24 KB，全部加起来 128 KB。
+默认单个文件 24 KB，全部加起来 128 KB。
 
 也就是说，一个超过 24 KB 的新源码文件会被排除在 review 之外，
 哪怕 diff 预算还剩很多。
+
+两个上限都可以调。单次用 `--max-untracked-bytes 128kb --max-untracked-total 1mb`，
+整个 workspace 用 `/gemini:setup --set-max-untracked-bytes 128kb --set-max-untracked-total 1mb`，
+撤销用 `--clear-untracked-limits`。
+
+同样一步一步调：整份文件比同样改动的 diff 占的 prompt 更多。
 
 每个被漏掉的文件都会连原因一起列出来：撞上单文件上限、diff 预算用完了、还是二进制文件。
 不用你自己猜。

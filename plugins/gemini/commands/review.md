@@ -1,6 +1,6 @@
 ---
 description: Run a Gemini code review against local git state. Use when the user asks for a Gemini review by name — "gemini review", "review with gemini", "have Gemini look at this". Review-only; it never edits code.
-argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [--exclude <paths>|--no-exclude] [focus ...]'
+argument-hint: '[--wait|--background] [--multi[=<lens,...>]] [--base <ref>] [--scope auto|working-tree|branch] [--cwd <path>] [--show-reasoning] [--show-files|--hide-files] [--max-diff-bytes <size>] [--exclude <paths>|--no-exclude] [--max-untracked-bytes <size>] [--max-untracked-total <size>] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 

@@ -325,6 +325,7 @@ export function renderSetupReport(report) {
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     `- skipped paths: ${report.excludePaths?.length > 0 ? report.excludePaths.join(", ") : "none"}${report.excludePathsInheritedFrom ? ` (inherited from ${report.excludePathsInheritedFrom})` : ""}`,
+    `- untracked file limits: ${report.maxUntrackedBytesLabel} each, ${report.maxUntrackedTotalBytesLabel} total${report.untrackedLimitsSource === "default" ? " (default)" : ""}`,
     `- diff budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ""}${report.maxInlineDiffBytesInheritedFrom ? ` (inherited from ${report.maxInlineDiffBytesInheritedFrom})` : ""}`,
     `- review base: ${report.reviewBase ?? "auto-detected"}${report.reviewBaseInheritedFrom ? ` (inherited from ${report.reviewBaseInheritedFrom})` : ""}`,
     `- covered-file list in reports: ${report.showReviewFiles ? "on" : "off"}${report.showReviewFilesSource === "default" ? " (default)" : ""}${report.showReviewFilesInheritedFrom ? ` (inherited from ${report.showReviewFilesInheritedFrom})` : ""}`,

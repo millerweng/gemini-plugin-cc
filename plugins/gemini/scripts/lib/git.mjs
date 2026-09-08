@@ -4,8 +4,14 @@ import path from "node:path";
 import { isProbablyText } from "./fs.mjs";
 import { formatCommandFailure, runCommand, runCommandChecked } from "./process.mjs";
 
-const MAX_UNTRACKED_BYTES = 24 * 1024;
-const MAX_AGGREGATE_UNTRACKED_BYTES = 128 * 1024;
+// An untracked file has no diff to send, so it goes in as whole content — under its own
+// two limits, one per file and one for the lot. 24 KB is small for a source file: a new
+// 35 KB module is left out while the diff budget sits untouched, which is how these came
+// up. Exported so the flags and the workspace settings that override them resolve against
+// the same defaults, and declared here rather than in review-config.mjs because that
+// module imports this one.
+export const DEFAULT_MAX_UNTRACKED_BYTES = 24 * 1024;
+export const DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES = 128 * 1024;
 // The byte budget is the only thing that decides whether a diff fits in the prompt.
 // There used to be a file-count gate as well — first 2, then 60 — and both did the same
 // damage: a diff well inside the byte budget was declared too large because it touched
@@ -344,7 +350,7 @@ function skipped(relativePath, reason) {
   return { body: `### ${relativePath}\n(skipped: ${reason})`, skipReason: reason };
 }
 
-function formatUntrackedFile(cwd, relativePath) {
+function formatUntrackedFile(cwd, relativePath, perFileMax) {
   const absolutePath = path.join(cwd, relativePath);
   let stat;
   try {
@@ -355,10 +361,10 @@ function formatUntrackedFile(cwd, relativePath) {
   if (stat.isDirectory()) {
     return skipped(relativePath, "directory");
   }
-  if (stat.size > MAX_UNTRACKED_BYTES) {
+  if (stat.size > perFileMax) {
     return skipped(
       relativePath,
-      `untracked file is ${stat.size} bytes, over the ${MAX_UNTRACKED_BYTES}-byte per-file limit for whole-file content`
+      `untracked file is ${stat.size} bytes, over the ${perFileMax}-byte per-file limit for whole-file content`
     );
   }
 
@@ -383,7 +389,8 @@ function formatUntrackedFile(cwd, relativePath) {
 // running out. A skip marker still names the file in the prompt, but its content is not
 // there — so for "was this reviewed?" it counts as omitted, exactly like a truncated one.
 function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
-  const aggregateMax = options.maxAggregateUntrackedBytes ?? MAX_AGGREGATE_UNTRACKED_BYTES;
+  const aggregateMax = options.maxAggregateUntrackedBytes ?? DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES;
+  const perFileMax = options.maxUntrackedBytes ?? DEFAULT_MAX_UNTRACKED_BYTES;
   const parts = [];
   const omitted = [];
   let totalBytes = 0;
@@ -391,7 +398,7 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
   let truncatedRawBytes = 0;
 
   for (const filePath of untrackedPaths) {
-    const formatted = formatUntrackedFile(cwd, filePath);
+    const formatted = formatUntrackedFile(cwd, filePath, perFileMax);
     const formattedBytes = Buffer.byteLength(formatted.body, "utf8");
     const isSkipMarker = formatted.skipReason !== null;
 
@@ -440,7 +447,10 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
   if (includeDiff) {
     const stagedDiff = gitChecked(cwd, withExcludes(["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
     const unstagedDiff = gitChecked(cwd, withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
-    const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    const untracked = formatUntrackedFiles(cwd, state.untracked, {
+      maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes,
+      maxUntrackedBytes: options.maxUntrackedBytes
+    });
     omittedFileDetails = untracked.omitted;
     parts = [
       formatSection("Git Status", status),
@@ -451,7 +461,10 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
   } else {
     const stagedStat = gitChecked(cwd, withExcludes(["diff", "--shortstat", "--cached"], ex)).stdout.trim();
     const unstagedStat = gitChecked(cwd, withExcludes(["diff", "--shortstat"], ex)).stdout.trim();
-    const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
+    const untracked = formatUntrackedFiles(cwd, state.untracked, {
+      maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes,
+      maxUntrackedBytes: options.maxUntrackedBytes
+    });
     const tracked = listUniqueFiles(state.staged, state.unstaged);
     const truncated = collectTruncatedDiff(
       cwd,
@@ -690,7 +703,8 @@ export function collectReviewContext(cwd, target, options = {}) {
       includeDiff,
       maxInlineDiffBytes,
       excludePatterns,
-      maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes
+      maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes,
+      maxUntrackedBytes: options.maxUntrackedBytes
     });
   } else {
     const comparison = buildBranchComparison(repoRoot, target.baseRef);

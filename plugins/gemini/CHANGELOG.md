@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.14.0
+
+- The untracked file limits are configurable. `--max-untracked-bytes 128kb` and
+  `--max-untracked-total 1mb` raise them for one run,
+  `/gemini:setup --set-max-untracked-bytes` and `--set-max-untracked-total` for the
+  workspace, and `--clear-untracked-limits` restores 24 KB and 128 KB. `--init` asks, with
+  128 KB / 1 MB offered as the ready-made answer, and worktrees inherit them like every
+  other review setting.
+- 24 KB was too small to be a hardcoded rule. An untracked file has no diff to send, so it
+  goes into the prompt whole — and a new 35 KB source module was dropped from the review
+  while the diff budget sat untouched. That is what 1.13.0 diagnosed; this is the fix.
+- Setting one half alone keeps the other at whatever is in force, rather than resetting it
+  to the default, so raising just the per-file cap cannot silently push it past the total.
+- A per-file limit above the total is rejected when it is set: the first untracked file
+  would take the whole budget and every later one would be skipped, which reads as an
+  arbitrary cut-off. The same pair already stored falls back to the defaults instead, since
+  that lookup runs on every review.
+
 ## 1.13.0
 
 - Every file left out of a review is reported with the reason. `Files NOT reviewed — their

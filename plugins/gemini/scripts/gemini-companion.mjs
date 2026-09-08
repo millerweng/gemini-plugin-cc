@@ -31,6 +31,8 @@ import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
   collectReviewContext,
   DEFAULT_INLINE_DIFF_MAX_BYTES,
+  DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES,
+  DEFAULT_MAX_UNTRACKED_BYTES,
   detectDefaultBranch,
   measureReviewScope,
   ensureGitRepository,
@@ -40,12 +42,14 @@ import { binaryAvailable, runCommand, terminateProcessTree } from "./lib/process
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   formatDiffByteBudget,
+  assertUntrackedLimitPair,
   parseDiffByteBudget,
   parseExcludePatterns,
   resolveConfiguredReviewBase,
   resolveExcludePatterns,
   resolveMaxInlineDiffBytes,
-  resolveShowReviewFiles
+  resolveShowReviewFiles,
+  resolveUntrackedLimits
 } from "./lib/review-config.mjs";
 import { buildLensDirective, getLens, mergeLensReviews, resolveLensIds } from "./lib/review-lenses.mjs";
 import {
@@ -229,6 +233,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const showReviewFiles = resolveShowReviewFiles(cwd, workspaceRoot);
   const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot);
   const excludes = resolveExcludePatterns(cwd, workspaceRoot);
+  const untracked = resolveUntrackedLimits(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -260,6 +265,11 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     excludePaths: excludes.patterns,
     excludePathsSource: excludes.source,
     excludePathsInheritedFrom: excludes.inheritedFrom,
+    maxUntrackedBytes: untracked.perFile.bytes,
+    maxUntrackedBytesLabel: formatDiffByteBudget(untracked.perFile.bytes),
+    maxUntrackedTotalBytes: untracked.total.bytes,
+    maxUntrackedTotalBytesLabel: formatDiffByteBudget(untracked.total.bytes),
+    untrackedLimitsSource: untracked.perFile.source === "config" || untracked.total.source === "config" ? "config" : "default",
     maxInlineDiffBytes: diffBudget.bytes,
     maxInlineDiffBytesLabel: formatDiffByteBudget(diffBudget.bytes),
     maxInlineDiffBytesSource: diffBudget.source,
@@ -366,6 +376,25 @@ function buildSetupInitPrompts(cwd, report) {
       ]
     },
     {
+      key: "untrackedLimits",
+      header: "New files",
+      question: "How much of a brand-new file should a review read? Untracked files go in whole, under limits separate from the diff budget.",
+      current: `${report.maxUntrackedBytesLabel} each, ${report.maxUntrackedTotalBytesLabel} in total`,
+      freeText: "Two sizes, per-file then total, such as `128kb` and `1mb`. Applies as `--set-max-untracked-bytes <size> --set-max-untracked-total <size>`.",
+      options: [
+        {
+          label: `${formatDiffByteBudget(DEFAULT_MAX_UNTRACKED_BYTES)} each, ${formatDiffByteBudget(DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES)} total (default)`,
+          description: "Small enough that an ordinary new source file can be left out of the review without the diff budget being touched.",
+          apply: "--clear-untracked-limits"
+        },
+        {
+          label: "128 KB each, 1 MB total",
+          description: "Big enough for a normal new module. Whole-file content costs more prompt than a diff of the same change.",
+          apply: "--set-max-untracked-bytes 128kb --set-max-untracked-total 1mb"
+        }
+      ]
+    },
+    {
       key: "reviewGate",
       header: "Review gate",
       question: "Should Claude be blocked from stopping until Gemini has reviewed the work?",
@@ -388,7 +417,7 @@ function buildSetupInitPrompts(cwd, report) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes", "set-exclude"],
+    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes", "set-exclude", "set-max-untracked-bytes", "set-max-untracked-total"],
     booleanOptions: [
       "json",
       "verify",
@@ -399,6 +428,7 @@ async function handleSetup(argv) {
       "disable-show-files",
       "clear-max-diff-bytes",
       "clear-exclude",
+      "clear-untracked-limits",
       "init"
     ],
     // No free-text arguments here, so an unrecognised flag is a mistake, not content.
@@ -419,6 +449,12 @@ async function handleSetup(argv) {
   }
   if (options["set-exclude"] && options["clear-exclude"]) {
     throw new Error("Choose either --set-exclude <paths> or --clear-exclude.");
+  }
+  if (
+    (options["set-max-untracked-bytes"] || options["set-max-untracked-total"]) &&
+    options["clear-untracked-limits"]
+  ) {
+    throw new Error("Choose either --set-max-untracked-bytes/--set-max-untracked-total or --clear-untracked-limits.");
   }
 
   const cwd = resolveCommandCwd(options);
@@ -449,6 +485,33 @@ async function handleSetup(argv) {
   } else if (options["clear-review-base"]) {
     setConfig(workspaceRoot, "reviewBase", null);
     actionsTaken.push(`Cleared the default review base for ${workspaceRoot}; auto-detection applies again.`);
+  }
+
+  if (options["set-max-untracked-bytes"] || options["set-max-untracked-total"]) {
+    // Either half can be set alone, so the other half comes from what is already in force
+    // — otherwise raising just the per-file cap could silently push it past the total.
+    const current = resolveUntrackedLimits(cwd, workspaceRoot);
+    const perFile = options["set-max-untracked-bytes"]
+      ? parseDiffByteBudget(options["set-max-untracked-bytes"])
+      : current.perFile.bytes;
+    const total = options["set-max-untracked-total"]
+      ? parseDiffByteBudget(options["set-max-untracked-total"])
+      : current.total.bytes;
+    assertUntrackedLimitPair(perFile, total);
+    setConfig(workspaceRoot, "maxUntrackedBytes", perFile);
+    setConfig(workspaceRoot, "maxUntrackedTotalBytes", total);
+    actionsTaken.push(
+      `Reviews in ${workspaceRoot} now send untracked files up to ${formatDiffByteBudget(perFile)} each, ` +
+        `${formatDiffByteBudget(total)} in total.`
+    );
+  } else if (options["clear-untracked-limits"]) {
+    setConfig(workspaceRoot, "maxUntrackedBytes", null);
+    setConfig(workspaceRoot, "maxUntrackedTotalBytes", null);
+    actionsTaken.push(
+      `Cleared the untracked file limits for ${workspaceRoot}; back to ` +
+        `${formatDiffByteBudget(DEFAULT_MAX_UNTRACKED_BYTES)} each and ` +
+        `${formatDiffByteBudget(DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES)} in total.`
+    );
   }
 
   if (options["set-exclude"]) {
@@ -657,7 +720,9 @@ async function executeReviewRun(request) {
 
   const context = collectReviewContext(request.cwd, target, {
     maxInlineDiffBytes: request.maxInlineDiffBytes,
-    excludePatterns: request.excludePatterns
+    excludePatterns: request.excludePatterns,
+    maxUntrackedBytes: request.maxUntrackedBytes,
+    maxAggregateUntrackedBytes: request.maxAggregateUntrackedBytes
   });
 
   const lensIds = Array.isArray(request.lensIds) && request.lensIds.length > 0 ? request.lensIds : null;
@@ -1179,7 +1244,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes", "exclude"],
+    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes", "exclude", "max-untracked-bytes", "max-untracked-total"],
     booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "no-exclude", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
@@ -1211,6 +1276,10 @@ async function handleReviewCommand(argv, config) {
   });
   const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot, {
     flagValue: options["max-diff-bytes"]
+  });
+  const untracked = resolveUntrackedLimits(cwd, workspaceRoot, {
+    perFileFlag: options["max-untracked-bytes"],
+    totalFlag: options["max-untracked-total"]
   });
   const target = resolveReviewTarget(cwd, {
     base: options.base,
@@ -1244,6 +1313,8 @@ async function handleReviewCommand(argv, config) {
         showFiles: showFiles.enabled,
         maxInlineDiffBytes: diffBudget.bytes,
         excludePatterns: excludes.patterns,
+        maxUntrackedBytes: untracked.perFile.bytes,
+        maxAggregateUntrackedBytes: untracked.total.bytes,
         lensIds,
         onProgress: progress
       }),
@@ -1263,7 +1334,7 @@ async function handleReviewScope(argv) {
   // blocks; neither moves the truncation verdict. Declaring them keeps
   // `rejectUnknownOptions` on for real typos instead of trading one failure for another.
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "cwd", "max-diff-bytes", "exclude", "model"],
+    valueOptions: ["base", "scope", "cwd", "max-diff-bytes", "exclude", "model", "max-untracked-bytes", "max-untracked-total"],
     booleanOptions: [
       "json",
       "no-exclude",

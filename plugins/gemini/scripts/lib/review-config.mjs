@@ -1,6 +1,11 @@
 import path from "node:path";
 
-import { DEFAULT_INLINE_DIFF_MAX_BYTES, getMainWorktreeRoot } from "./git.mjs";
+import {
+  DEFAULT_INLINE_DIFF_MAX_BYTES,
+  DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES,
+  DEFAULT_MAX_UNTRACKED_BYTES,
+  getMainWorktreeRoot
+} from "./git.mjs";
 import { getConfig } from "./state.mjs";
 
 /**
@@ -176,4 +181,64 @@ export function resolveExcludePatterns(cwd, workspaceRoot, options = {}) {
   } catch {
     return { patterns: [], source: "default", inheritedFrom: null };
   }
+}
+
+/**
+ * Limits on untracked file content. These are separate from the diff budget because an
+ * untracked file has no diff: it goes into the prompt whole, so a new 35 KB source file is
+ * left out under the 24 KB default while the diff budget sits untouched.
+ *
+ * A total below the per-file limit would let the first file through and starve every one
+ * after it, which reads as an arbitrary cut-off — so that pair is rejected when it is set,
+ * and ignored when it is already stored.
+ */
+function resolveOneByteLimit(cwd, workspaceRoot, key, fallback, flagValue) {
+  if (flagValue !== undefined && flagValue !== null && flagValue !== false) {
+    return { bytes: parseDiffByteBudget(flagValue), source: "flag", inheritedFrom: null };
+  }
+  const { value, inheritedFrom } = resolveInheritedConfigValue(cwd, workspaceRoot, key);
+  const parsed = Number(value);
+  if (value === null || !Number.isFinite(parsed) || parsed <= 0) {
+    return { bytes: fallback, source: "default", inheritedFrom: null };
+  }
+  return { bytes: Math.floor(parsed), source: "config", inheritedFrom };
+}
+
+export function assertUntrackedLimitPair(perFileBytes, totalBytes) {
+  if (perFileBytes > totalBytes) {
+    throw new Error(
+      `The per-file limit (${perFileBytes} bytes) cannot exceed the total (${totalBytes} bytes) — ` +
+        "the first untracked file would use the whole budget and every later one would be skipped."
+    );
+  }
+}
+
+export function resolveUntrackedLimits(cwd, workspaceRoot, options = {}) {
+  const perFile = resolveOneByteLimit(
+    cwd,
+    workspaceRoot,
+    "maxUntrackedBytes",
+    DEFAULT_MAX_UNTRACKED_BYTES,
+    options.perFileFlag
+  );
+  const total = resolveOneByteLimit(
+    cwd,
+    workspaceRoot,
+    "maxUntrackedTotalBytes",
+    DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES,
+    options.totalFlag
+  );
+
+  // Runs on every review, so a stored pair that cannot work degrades to the defaults
+  // rather than failing the command.
+  if (perFile.bytes > total.bytes) {
+    if (perFile.source === "flag" || total.source === "flag") {
+      assertUntrackedLimitPair(perFile.bytes, total.bytes);
+    }
+    return {
+      perFile: { bytes: DEFAULT_MAX_UNTRACKED_BYTES, source: "default", inheritedFrom: null },
+      total: { bytes: DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES, source: "default", inheritedFrom: null }
+    };
+  }
+  return { perFile, total };
 }
