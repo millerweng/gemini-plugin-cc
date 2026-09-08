@@ -43,6 +43,18 @@ function withExcludes(args, excludePatterns = []) {
   return [...args, "--", ":(top)", ...excludePatterns.map((pattern) => `:(top,exclude)${pattern}`)];
 }
 
+// Omissions carry a reason, so they cannot go through listUniqueFiles. First reason wins:
+// a file skipped for its size is not also "budget already spent".
+function mergeOmissions(...groups) {
+  const byFile = new Map();
+  for (const entry of groups.flat()) {
+    if (entry && !byFile.has(entry.file)) {
+      byFile.set(entry.file, entry);
+    }
+  }
+  return [...byFile.values()].sort((left, right) => left.file.localeCompare(right.file));
+}
+
 function listUniqueFiles(...groups) {
   return [...new Set(groups.flat().filter(Boolean))].sort();
 }
@@ -61,7 +73,7 @@ function collectTruncatedDiff(cwd, files, diffArgsFor, maxBytes) {
   for (const file of files) {
     if (omitted.length > 0) {
       // Once the budget is gone, stop spending git calls on files that cannot fit.
-      omitted.push(file);
+      omitted.push({ file, reason: "diff budget was already spent" });
       continue;
     }
     const result = git(cwd, [...diffArgsFor(file), "--", file], { maxBuffer: maxBytes + 1 });
@@ -69,7 +81,7 @@ function collectTruncatedDiff(cwd, files, diffArgsFor, maxBytes) {
       // Usually ENOBUFS: this one file's diff exceeds the whole budget. Treating that
       // as "no diff" would drop it from the diff and from the omitted list both,
       // leaving no trace that it was never reviewed.
-      omitted.push(file);
+      omitted.push({ file, reason: "this one file's diff exceeds the whole budget" });
       continue;
     }
     const body = result.stdout;
@@ -78,7 +90,7 @@ function collectTruncatedDiff(cwd, files, diffArgsFor, maxBytes) {
       continue;
     }
     if (used + body.length > maxBytes) {
-      omitted.push(file);
+      omitted.push({ file, reason: "did not fit in the remaining diff budget" });
       continue;
     }
     included.push(body);
@@ -100,9 +112,9 @@ function formatOmittedFiles(omitted) {
   }
   const listed = omitted.slice(0, MAX_OMITTED_FILES_LISTED);
   const lines = [
-    `${omitted.length} file(s) did not fit in the prompt and their diffs are NOT included below.`,
+    `${omitted.length} file(s) are NOT included below, so there is no evidence about them here.`,
     "Do not draw conclusions about them; say so if they matter to a finding:",
-    ...listed.map((file) => `- ${file}`)
+    ...listed.map((entry) => `- ${entry.file} (${entry.reason})`)
   ];
   if (omitted.length > listed.length) {
     lines.push(`- ... and ${omitted.length - listed.length} more`);
@@ -324,32 +336,46 @@ function formatSection(title, body) {
   return [`## ${title}`, "", body.trim() ? body.trim() : "(none)", ""].join("\n");
 }
 
+// A skipped file still gets a line in the prompt so Gemini knows it exists, and the reason
+// now travels with it so the report can say why instead of leaving "never reached Gemini"
+// as the whole explanation. Two untracked files over the per-file limit read as an
+// unexplained gap otherwise, which is how this came up.
+function skipped(relativePath, reason) {
+  return { body: `### ${relativePath}\n(skipped: ${reason})`, skipReason: reason };
+}
+
 function formatUntrackedFile(cwd, relativePath) {
   const absolutePath = path.join(cwd, relativePath);
   let stat;
   try {
     stat = fs.statSync(absolutePath);
   } catch {
-    return `### ${relativePath}\n(skipped: broken symlink or unreadable file)`;
+    return skipped(relativePath, "broken symlink or unreadable file");
   }
   if (stat.isDirectory()) {
-    return `### ${relativePath}\n(skipped: directory)`;
+    return skipped(relativePath, "directory");
   }
   if (stat.size > MAX_UNTRACKED_BYTES) {
-    return `### ${relativePath}\n(skipped: ${stat.size} bytes exceeds ${MAX_UNTRACKED_BYTES} byte limit)`;
+    return skipped(
+      relativePath,
+      `untracked file is ${stat.size} bytes, over the ${MAX_UNTRACKED_BYTES}-byte per-file limit for whole-file content`
+    );
   }
 
   let buffer;
   try {
     buffer = fs.readFileSync(absolutePath);
   } catch {
-    return `### ${relativePath}\n(skipped: broken symlink or unreadable file)`;
+    return skipped(relativePath, "broken symlink or unreadable file");
   }
   if (!isProbablyText(buffer)) {
-    return `### ${relativePath}\n(skipped: binary file)`;
+    return skipped(relativePath, "binary file");
   }
 
-  return [`### ${relativePath}`, "```", buffer.toString("utf8").trimEnd(), "```"].join("\n");
+  return {
+    body: [`### ${relativePath}`, "```", buffer.toString("utf8").trimEnd(), "```"].join("\n"),
+    skipReason: null
+  };
 }
 
 // An untracked file reaches Gemini as its whole content, and three things can stop that:
@@ -366,11 +392,14 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
 
   for (const filePath of untrackedPaths) {
     const formatted = formatUntrackedFile(cwd, filePath);
-    const formattedBytes = Buffer.byteLength(formatted, "utf8");
-    const isSkipMarker = formatted.includes("(skipped:");
+    const formattedBytes = Buffer.byteLength(formatted.body, "utf8");
+    const isSkipMarker = formatted.skipReason !== null;
 
     if (!isSkipMarker && totalBytes + formattedBytes > aggregateMax) {
-      omitted.push(filePath);
+      omitted.push({
+        file: filePath,
+        reason: `the ${aggregateMax}-byte total budget for untracked file content was already spent`
+      });
       truncatedCount++;
       try {
         const stat = fs.statSync(path.join(cwd, filePath));
@@ -381,9 +410,9 @@ function formatUntrackedFiles(cwd, untrackedPaths, options = {}) {
       continue;
     }
 
-    parts.push(formatted);
+    parts.push(formatted.body);
     if (isSkipMarker) {
-      omitted.push(filePath);
+      omitted.push({ file: filePath, reason: formatted.skipReason });
     } else {
       totalBytes += formattedBytes;
     }
@@ -407,12 +436,12 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
   const changedFiles = listUniqueFiles(state.staged, state.unstaged, state.untracked);
 
   let parts;
-  let omittedFiles;
+  let omittedFileDetails;
   if (includeDiff) {
     const stagedDiff = gitChecked(cwd, withExcludes(["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
     const unstagedDiff = gitChecked(cwd, withExcludes(["diff", "--binary", "--no-ext-diff", "--submodule=diff"], ex)).stdout;
     const untracked = formatUntrackedFiles(cwd, state.untracked, { maxAggregateUntrackedBytes: options.maxAggregateUntrackedBytes });
-    omittedFiles = untracked.omitted;
+    omittedFileDetails = untracked.omitted;
     parts = [
       formatSection("Git Status", status),
       formatSection("Staged Diff", stagedDiff),
@@ -430,13 +459,13 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
       () => ["diff", "HEAD", "--binary", "--no-ext-diff", "--submodule=diff"],
       options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
     );
-    omittedFiles = listUniqueFiles(truncated.omitted, untracked.omitted);
+    omittedFileDetails = mergeOmissions(truncated.omitted, untracked.omitted);
     parts = [
       formatSection("Git Status", status),
       formatSection("Staged Diff Stat", stagedStat),
       formatSection("Unstaged Diff Stat", unstagedStat),
       formatSection("Diff (partial)", truncated.body),
-      formatSection("Files Not Included", formatOmittedFiles(omittedFiles)),
+      formatSection("Files Not Included", formatOmittedFiles(omittedFileDetails)),
       formatSection("Untracked Files", untracked.body)
     ];
   }
@@ -446,7 +475,7 @@ function collectWorkingTreeContext(cwd, state, options = {}) {
     summary: `Reviewing ${state.staged.length} staged, ${state.unstaged.length} unstaged, and ${state.untracked.length} untracked file(s).`,
     content: parts.join("\n"),
     changedFiles,
-    omittedFiles
+    omittedFileDetails
   };
 }
 
@@ -462,7 +491,7 @@ function collectBranchContext(cwd, baseRef, options = {}) {
   const diffStat = gitChecked(cwd, withExcludes(["diff", "--stat", comparison.commitRange], ex)).stdout.trim();
 
   // Assigned by the truncated branch below; an inline diff omits nothing.
-  let omittedFiles = [];
+  let omittedFileDetails = [];
 
   const content = includeDiff
       ? [
@@ -480,7 +509,7 @@ function collectBranchContext(cwd, baseRef, options = {}) {
             () => ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
             options.maxInlineDiffBytes ?? DEFAULT_INLINE_DIFF_MAX_BYTES
           );
-          omittedFiles = truncated.omitted;
+          omittedFileDetails = truncated.omitted;
           return [
             formatSection("Commit Log", logOutput),
             formatSection("Diff Stat", truncateDiffStat(diffStat)),
@@ -494,7 +523,7 @@ function collectBranchContext(cwd, baseRef, options = {}) {
     summary: `Reviewing branch ${currentBranch} against ${baseRef} from merge-base ${comparison.mergeBase}.`,
     content,
     changedFiles,
-    omittedFiles,
+    omittedFileDetails,
     comparison
   };
 }
@@ -686,7 +715,8 @@ export function collectReviewContext(cwd, target, options = {}) {
   // What changed is not what was reviewed. A truncated diff drops whole files, and an
   // untracked file can be skipped for its size or its type — so the reviewed set is the
   // changed set minus everything that never made it into the prompt.
-  const omittedFiles = details.omittedFiles ?? [];
+  const omittedFileDetails = details.omittedFileDetails ?? [];
+  const omittedFiles = omittedFileDetails.map((entry) => entry.file);
   const omittedSet = new Set(omittedFiles);
   const reviewedFiles = details.changedFiles.filter((file) => !omittedSet.has(file));
 
@@ -710,6 +740,7 @@ export function collectReviewContext(cwd, target, options = {}) {
     collectionGuidance: buildAdversarialCollectionGuidance({ includeDiff }),
     ...details,
     omittedFiles,
+    omittedFileDetails,
     reviewedFiles
   };
 }

@@ -165,7 +165,10 @@ test("collectReviewContext falls back to lightweight context for oversized singl
   // The only file is larger than the budget, so it is named as omitted instead of
   // being partially pasted in.
   assert.doesNotMatch(context.content, /xxx/);
-  assert.match(context.content, /1 file\(s\) did not fit/);
+  assert.match(context.content, /1 file\(s\) are NOT included below/);
+  // The reason travels with the name: "never reached Gemini" alone leaves a reader
+  // guessing between truncation, a size cap, and a binary file.
+  assert.match(context.content, /- app\.js \(this one file's diff exceeds the whole budget\)/);
   assert.match(context.content, /- app\.js/);
 });
 
@@ -331,7 +334,8 @@ test("a file too large for the budget is named, not silently dropped", () => {
   const context = collectReviewContext(cwd, target, { maxInlineDiffBytes: 512 });
 
   assert.equal(context.inputMode, "truncated-diff");
-  assert.match(context.content, /did not fit/);
+  assert.match(context.content, /are NOT included below/);
+  assert.match(context.content, /- huge\.js \(this one file's diff exceeds the whole budget\)/);
   assert.match(context.content, /- huge\.js/);
   // The oversized file's content must not leak in partially.
   assert.doesNotMatch(context.content, /yyyy/);
@@ -356,7 +360,9 @@ test("every changed file appears either in the diff or in the omitted list", () 
   assert.equal(context.inputMode, "truncated-diff");
   for (const name of names) {
     const inDiff = context.content.includes(`+++ b/${name}`);
-    const inOmitted = new RegExp(`- ${name.replace(".", "\\.")}$`, "m").test(context.content);
+    // An omitted file is listed with the reason it was left out, so the pattern requires
+    // one: a bare name would mean the report knows it is missing but not why.
+    const inOmitted = new RegExp(`^- ${name.replace(".", "\\.")} \\(.+\\)$`, "m").test(context.content);
     assert.ok(inDiff || inOmitted, `${name} is accounted for in neither the diff nor the omitted list`);
   }
 });

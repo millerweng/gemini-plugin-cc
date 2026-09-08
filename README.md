@@ -227,6 +227,12 @@ whole subtree with it. A bare glob matches at any depth, so `*.md` skips
 `docs/notes.md` too. `--exclude <paths>` sets them for one run and `--no-exclude` reviews
 everything despite the setting.
 
+An untracked file is sent as whole content rather than as a diff, under its own limits:
+24 KB per file and 128 KB in total. A new source file over 24 KB is therefore left out of
+the review even when the diff budget is nowhere near spent. Every file left out is listed
+with the reason — the size cap, a spent diff budget, a binary file — so a gap in the
+reviewed list never has to be guessed at.
+
 With `--show-files` on, a report that skipped anything names the patterns and how many
 changed files they held back, and says it is a chosen scope rather than something the
 review missed — so a narrowed review does not read as a coverage gap. Truncated files stay

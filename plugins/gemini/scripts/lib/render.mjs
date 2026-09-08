@@ -444,9 +444,20 @@ function appendReviewedFilesSection(lines, meta) {
   }
 
   if (omitted.length > 0) {
+    // Each one carries the reason it was left out. Without it, two files missing from an
+    // otherwise complete list read as an unexplained gap, and the reader cannot tell a
+    // truncated diff from an untracked file over the per-file size cap — which are
+    // different problems with different fixes.
+    const reasons = new Map(
+      (Array.isArray(meta.omittedFileDetails) ? meta.omittedFileDetails : []).map((entry) => [
+        entry.file,
+        entry.reason
+      ])
+    );
     lines.push("", `Files NOT reviewed (${omitted.length}) — their content never reached Gemini:`);
     for (const file of omitted) {
-      lines.push(`- ${file}`);
+      const reason = reasons.get(file);
+      lines.push(reason ? `- ${file} (${reason})` : `- ${file}`);
     }
   }
 }

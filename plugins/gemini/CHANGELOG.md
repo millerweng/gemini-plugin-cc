@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.13.0
+
+- Every file left out of a review is reported with the reason. `Files NOT reviewed — their
+  content never reached Gemini` named the files and stopped there, so two `.py` files
+  missing from an otherwise complete list read as an unexplained gap. The causes are
+  different problems with different fixes — a spent diff budget, an untracked file over the
+  24 KB per-file cap, a binary file, the 128 KB total for untracked content — and the code
+  already knew which one applied. It computed the reason for the prompt and discarded it
+  for the report.
+- The reasons reach the prompt as well, so Gemini sees why a file it was told about carries
+  no evidence.
+- Nothing about the limits changed. An untracked file is sent as whole content rather than
+  as a diff, so a new source file over 24 KB is left out even when the diff budget is
+  nowhere near spent — which is the case that raised this. Both READMEs say so now.
+
 ## 1.12.1
 
 - `review-scope` accepts every flag `review` accepts. The command prompts forward

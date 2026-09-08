@@ -124,3 +124,57 @@ test("a review that covered nothing says so instead of printing an empty list", 
   assert.match(output, /Files reviewed \(0\):/);
   assert.match(output, /no file diff reached Gemini/);
 });
+
+// "their content never reached Gemini" with no reason leaves the reader guessing between
+// truncation, a per-file size cap, and a binary file — different problems, different fixes.
+// Two .py files missing from an otherwise complete list is what raised the question.
+test("an omitted file is reported with the reason it was left out", async () => {
+  const { renderReviewResult } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const cwd = makeTempDir("reason-untracked-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "seed.js"), "1;\n");
+  run("git", ["add", "."], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  fs.writeFileSync(path.join(cwd, "small.py"), "ok\n");
+  fs.writeFileSync(path.join(cwd, "big.py"), "z".repeat(35 * 1024));
+
+  const context = collectReviewContext(cwd, resolveReviewTarget(cwd, {}), {});
+
+  assert.deepEqual(context.omittedFiles, ["big.py"]);
+  assert.match(
+    context.omittedFileDetails[0].reason,
+    /over the 24576-byte per-file limit/,
+    "the size cap is named, with both numbers"
+  );
+
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "Fine.", findings: [] }, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      showFiles: true,
+      reviewedFiles: context.reviewedFiles,
+      omittedFiles: context.omittedFiles,
+      omittedFileDetails: context.omittedFileDetails
+    }
+  );
+  assert.match(output, /- big\.py \(untracked file is \d+ bytes, over the 24576-byte per-file limit/);
+});
+
+// A per-file skip and a spent diff budget are different reasons, and a report that
+// flattens them into one sentence sends the reader to the wrong fix.
+test("truncation and a size cap are reported as different reasons", () => {
+  const cwd = makeTempDir("reason-mixed-");
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "tracked.js"), "1;\n");
+  run("git", ["add", "."], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+  fs.writeFileSync(path.join(cwd, "tracked.js"), `${"y".repeat(4000)};\n`);
+  fs.writeFileSync(path.join(cwd, "untracked-big.py"), "z".repeat(35 * 1024));
+
+  const context = collectReviewContext(cwd, resolveReviewTarget(cwd, {}), { maxInlineDiffBytes: 500 });
+  const byFile = new Map(context.omittedFileDetails.map((entry) => [entry.file, entry.reason]));
+
+  assert.match(byFile.get("tracked.js"), /budget/, "the tracked file lost to the diff budget");
+  assert.match(byFile.get("untracked-big.py"), /per-file limit/, "the untracked one hit the size cap");
+});
