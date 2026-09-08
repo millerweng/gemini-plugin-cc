@@ -87,6 +87,7 @@
 | `--exclude <paths>` / `--no-exclude` | 只对这次跳过这些路径，或者无视配置把全部内容都 review |
 | `--max-untracked-bytes <size>` | 抬高新增（untracked）文件的单文件上限 |
 | `--max-untracked-total <size>` | 抬高新增文件的总量上限 |
+| `--language <name>` | 这次的 findings 用这个语言写 |
 | `--progress` | 输出被重定向时也打印进度行 |
 | `--wait` / `--background` | 前台跑，或者转后台 |
 
@@ -201,6 +202,19 @@ ref 在设置时就解析，写错了当场报错。
 每个 git worktree 是独立的 workspace。worktree 自己没设 base，就继承主 checkout 的。
 
 固定的 base 只在做 branch review 时提供 ref。有未提交改动时，还是优先 review 未提交的部分。
+
+**用别的语言写 review。** 不设置的话 findings 是英文的：
+
+```bash
+/gemini:setup --set-language 中文   # 用 --clear-language 撤销
+```
+
+只有散文部分会换语言。
+
+verdict 仍然是 `approve` 或 `needs-attention`，严重级别仍然是 `critical`/`high`/`medium`/`low`。
+文件路径、JSON 的 key、以及从 diff 里引用的代码都保持原样 —— 这样报告还能正常解析，路径也还能点开。
+
+`--language <name>` 只对单次生效。
 
 **跳过某些路径。** 仓库里同时放着自己的安装副本时，同一份源码会被 review 两三遍，
 而这些副本吃掉的正是原件需要的 diff 预算：

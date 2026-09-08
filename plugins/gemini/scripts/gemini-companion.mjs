@@ -43,11 +43,14 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   formatDiffByteBudget,
   assertUntrackedLimitPair,
+  buildLanguageDirective,
   parseDiffByteBudget,
   parseExcludePatterns,
+  parseReviewLanguage,
   resolveConfiguredReviewBase,
   resolveExcludePatterns,
   resolveMaxInlineDiffBytes,
+  resolveReviewLanguage,
   resolveShowReviewFiles,
   resolveUntrackedLimits
 } from "./lib/review-config.mjs";
@@ -234,6 +237,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const diffBudget = resolveMaxInlineDiffBytes(cwd, workspaceRoot);
   const excludes = resolveExcludePatterns(cwd, workspaceRoot);
   const untracked = resolveUntrackedLimits(cwd, workspaceRoot);
+  const reviewLanguage = resolveReviewLanguage(cwd, workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -257,6 +261,8 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     auth: authStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
+    reviewLanguage: reviewLanguage.language,
+    reviewLanguageInheritedFrom: reviewLanguage.inheritedFrom,
     reviewBase: reviewBase.base,
     reviewBaseInheritedFrom: reviewBase.inheritedFrom,
     showReviewFiles: showReviewFiles.enabled,
@@ -334,6 +340,25 @@ function buildSetupInitPrompts(cwd, report) {
           label: "No",
           description: "Shorter reports. Pass --show-files when you want the lists for one run.",
           apply: "--disable-show-files"
+        }
+      ]
+    },
+    {
+      key: "reviewLanguage",
+      header: "Language",
+      question: "What language should a review write its findings in?",
+      current: report.reviewLanguage ?? "whatever Gemini picks",
+      freeText: "Any language name, such as Chinese or Japanese. Applies as `--set-language <name>`.",
+      options: [
+        {
+          label: "Whatever Gemini picks",
+          description: "No instruction either way. In practice that means English.",
+          apply: "--clear-language"
+        },
+        {
+          label: "Chinese",
+          description: "Prose in Chinese. The verdict, severities, file paths and JSON keys stay as the schema defines them.",
+          apply: "--set-language Chinese"
         }
       ]
     },
@@ -417,7 +442,7 @@ function buildSetupInitPrompts(cwd, report) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes", "set-exclude", "set-max-untracked-bytes", "set-max-untracked-total"],
+    valueOptions: ["cwd", "set-review-base", "set-max-diff-bytes", "set-exclude", "set-max-untracked-bytes", "set-max-untracked-total", "set-language"],
     booleanOptions: [
       "json",
       "verify",
@@ -429,6 +454,7 @@ async function handleSetup(argv) {
       "clear-max-diff-bytes",
       "clear-exclude",
       "clear-untracked-limits",
+      "clear-language",
       "init"
     ],
     // No free-text arguments here, so an unrecognised flag is a mistake, not content.
@@ -446,6 +472,9 @@ async function handleSetup(argv) {
   }
   if (options["set-max-diff-bytes"] && options["clear-max-diff-bytes"]) {
     throw new Error("Choose either --set-max-diff-bytes <n> or --clear-max-diff-bytes.");
+  }
+  if (options["set-language"] && options["clear-language"]) {
+    throw new Error("Choose either --set-language <name> or --clear-language.");
   }
   if (options["set-exclude"] && options["clear-exclude"]) {
     throw new Error("Choose either --set-exclude <paths> or --clear-exclude.");
@@ -512,6 +541,15 @@ async function handleSetup(argv) {
         `${formatDiffByteBudget(DEFAULT_MAX_UNTRACKED_BYTES)} each and ` +
         `${formatDiffByteBudget(DEFAULT_MAX_AGGREGATE_UNTRACKED_BYTES)} in total.`
     );
+  }
+
+  if (options["set-language"]) {
+    const language = parseReviewLanguage(options["set-language"]);
+    setConfig(workspaceRoot, "reviewLanguage", language);
+    actionsTaken.push(`Reviews in ${workspaceRoot} now write their findings in ${language}.`);
+  } else if (options["clear-language"]) {
+    setConfig(workspaceRoot, "reviewLanguage", null);
+    actionsTaken.push(`Cleared the review language for ${workspaceRoot}; Gemini picks it again.`);
   }
 
   if (options["set-exclude"]) {
@@ -587,7 +625,7 @@ async function handleSetup(argv) {
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
-function buildReviewPrompt(context, focusText, reviewName, lens = null) {
+function buildReviewPrompt(context, focusText, reviewName, lens = null, language = null) {
   const templateName =
     reviewName === "Adversarial Review" ? "adversarial-review" : "review";
   const template = loadPromptTemplate(ROOT_DIR, templateName);
@@ -600,6 +638,8 @@ function buildReviewPrompt(context, focusText, reviewName, lens = null) {
     // Empty for a single-pass review, which keeps that prompt byte-identical to the
     // one this plugin has always sent.
     LENS_DIRECTIVE: buildLensDirective(lens),
+    // Empty when unset, so an unconfigured review sends the prompt it always has.
+    LANGUAGE_DIRECTIVE: buildLanguageDirective(language),
     OUTPUT_SCHEMA: JSON.stringify(readOutputSchema(REVIEW_SCHEMA), null, 2)
   });
 }
@@ -689,7 +729,7 @@ async function resolveLatestTrackedTaskSession(cwd, options = {}) {
 // One Gemini pass over an already-collected context. Split out so a multi-lens review
 // can reuse the same diff instead of re-running git for every pass.
 async function runReviewPass(context, request, reviewName, focusText, lens) {
-  const prompt = buildReviewPrompt(context, focusText, reviewName, lens);
+  const prompt = buildReviewPrompt(context, focusText, reviewName, lens, request.language ?? null);
   const result = await runAcpReview(context.repoRoot, {
     prompt,
     model: request.model,
@@ -1244,7 +1284,7 @@ function enqueueBackgroundTask(cwd, job, request) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes", "exclude", "max-untracked-bytes", "max-untracked-total"],
+    valueOptions: ["base", "scope", "model", "cwd", "max-diff-bytes", "exclude", "max-untracked-bytes", "max-untracked-total", "language"],
     booleanOptions: ["json", "background", "wait", "show-reasoning", "show-files", "hide-files", "no-exclude", "progress"],
     optionalValueOptions: ["multi"],
     aliasMap: { m: "model" }
@@ -1281,6 +1321,7 @@ async function handleReviewCommand(argv, config) {
     perFileFlag: options["max-untracked-bytes"],
     totalFlag: options["max-untracked-total"]
   });
+  const reviewLanguage = resolveReviewLanguage(cwd, workspaceRoot, { flagValue: options.language });
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     defaultBase: configuredBase,
@@ -1315,6 +1356,7 @@ async function handleReviewCommand(argv, config) {
         excludePatterns: excludes.patterns,
         maxUntrackedBytes: untracked.perFile.bytes,
         maxAggregateUntrackedBytes: untracked.total.bytes,
+        language: reviewLanguage.language,
         lensIds,
         onProgress: progress
       }),

@@ -324,6 +324,7 @@ export function renderSetupReport(report) {
     `- auth: ${report.auth.detail}${report.auth.verified === true ? " (verified)" : report.auth.verified === false ? " (verification failed)" : " (unverified)"}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
+    `- review language: ${report.reviewLanguage ?? "whatever Gemini picks"}${report.reviewLanguageInheritedFrom ? ` (inherited from ${report.reviewLanguageInheritedFrom})` : ""}`,
     `- skipped paths: ${report.excludePaths?.length > 0 ? report.excludePaths.join(", ") : "none"}${report.excludePathsInheritedFrom ? ` (inherited from ${report.excludePathsInheritedFrom})` : ""}`,
     `- untracked file limits: ${report.maxUntrackedBytesLabel} each, ${report.maxUntrackedTotalBytesLabel} total${report.untrackedLimitsSource === "default" ? " (default)" : ""}`,
     `- diff budget: ${report.maxInlineDiffBytesLabel}${report.maxInlineDiffBytesSource === "default" ? " (default)" : ""}${report.maxInlineDiffBytesInheritedFrom ? ` (inherited from ${report.maxInlineDiffBytesInheritedFrom})` : ""}`,

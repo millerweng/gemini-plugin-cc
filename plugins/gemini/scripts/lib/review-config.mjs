@@ -242,3 +242,71 @@ export function resolveUntrackedLimits(cwd, workspaceRoot, options = {}) {
   }
   return { perFile, total };
 }
+
+// The language the prose in a review is written in. Unset means whatever the prompt
+// produces on its own, which keeps that prompt byte-identical to the one this plugin has
+// always sent — the same reason an unused lens contributes an empty directive.
+const MAX_LANGUAGE_LENGTH = 40;
+
+/**
+ * The value is free text because the set of languages is not ours to enumerate, and it is
+ * interpolated into a prompt. Two things keep that safe: collapsing whitespace flattens a
+ * multi-line value into one line, so it cannot introduce instructions of its own, and the
+ * remaining characters that could close the surrounding element or open a template
+ * expression are refused outright.
+ */
+export function parseReviewLanguage(input) {
+  const language = String(input ?? "").trim().replace(/\s+/g, " ");
+  if (!language) {
+    throw new Error("Name a language, such as Chinese, Japanese, or French.");
+  }
+  if (language.length > MAX_LANGUAGE_LENGTH) {
+    throw new Error(`A language name must be ${MAX_LANGUAGE_LENGTH} characters or fewer, got ${language.length}.`);
+  }
+  // Newlines are already gone by here, folded into spaces by the collapse above.
+  if (/[<>{}`]/.test(language)) {
+    throw new Error(`A language name cannot contain <, >, {, }, or backticks: ${language}`);
+  }
+  return language;
+}
+
+export function resolveReviewLanguage(cwd, workspaceRoot, options = {}) {
+  if (options.flagValue !== undefined && options.flagValue !== null && options.flagValue !== false) {
+    return { language: parseReviewLanguage(options.flagValue), source: "flag", inheritedFrom: null };
+  }
+  const { value, inheritedFrom } = resolveInheritedConfigValue(cwd, workspaceRoot, "reviewLanguage");
+  if (value === null) {
+    return { language: null, source: "default", inheritedFrom: null };
+  }
+  try {
+    return { language: parseReviewLanguage(value), source: "config", inheritedFrom };
+  } catch {
+    // Runs on every review, so a hand-edited settings file falls back to the prompt's own
+    // language rather than failing the command.
+    return { language: null, source: "default", inheritedFrom: null };
+  }
+}
+
+/**
+ * Only the prose moves. `verdict` and `severity` are enums the renderer switches on, the
+ * keys are what the schema validates, and a translated file path would not resolve — so
+ * the directive names each of those and leaves them alone.
+ */
+export function buildLanguageDirective(language) {
+  if (!language) {
+    return "";
+  }
+  return [
+    "",
+    "<output_language>",
+    `Write every piece of prose in ${language}: the summary, each finding's title, body and recommendation, and every next step.`,
+    "Leave the machine-readable parts exactly as the schema defines them, whatever language you are writing in:",
+    "- the JSON keys themselves",
+    "- `verdict`, which stays `approve` or `needs-attention`",
+    "- `severity`, which stays `critical`, `high`, `medium`, or `low`",
+    "- `file` paths, `line_start`, `line_end`, and `confidence`",
+    "Keep identifiers, code, file names and error strings quoted from the diff in their original form; write the explanation around them in " + language + ".",
+    "</output_language>",
+    ""
+  ].join("\n");
+}

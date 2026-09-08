@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.15.0
+
+- Reviews can be written in another language. `/gemini:setup --set-language Chinese` for a
+  workspace, `--language <name>` for one run, `--clear-language` to undo. `--init` asks, and
+  worktrees inherit it like every other review setting.
+- Only the prose moves. `verdict` and `severity` are enums the renderer switches on, the
+  JSON keys are what the schema validates, and a translated file path would not resolve —
+  so the directive names each of those and leaves them alone, along with identifiers and
+  code quoted from the diff.
+- An unset language adds nothing to the prompt, which keeps it byte-identical to the one
+  sent before this setting existed. Same arrangement as an unused lens.
+- The name is bounded and cannot carry prompt markup: it goes into the prompt, so `<`, `>`,
+  `{`, `}` and backticks are refused, a multi-line value is folded onto one line, and a
+  value already broken in a settings file falls back to adding no directive at all.
+
 ## 1.14.0
 
 - The untracked file limits are configurable. `--max-untracked-bytes 128kb` and

@@ -89,6 +89,7 @@ Both review commands take the same flags and accept focus text after them.
 | `--exclude <paths>` / `--no-exclude` | Skip these paths for this run, or review everything despite the setting |
 | `--max-untracked-bytes <size>` | Raise the per-file limit on new (untracked) file content |
 | `--max-untracked-total <size>` | Raise the total limit on new file content |
+| `--language <name>` | Write the findings in this language for this run |
 | `--progress` | Stream progress lines even when output is captured |
 | `--wait` / `--background` | Foreground, or detach |
 
@@ -215,6 +216,18 @@ so a truncated run names what it missed without you remembering the flag:
 `--show-files` still turns it on for a single run, and `--hide-files` silences one run in a
 workspace where the setting is on. Worktrees inherit the setting the same way the review
 base does, and a worktree that turns it off stays off.
+
+**Write reviews in another language.** Findings come back in English unless you say
+otherwise:
+
+```bash
+/gemini:setup --set-language Chinese   # --clear-language to undo
+```
+
+Only the prose moves. The verdict stays `approve` or `needs-attention`, severities stay
+`critical`/`high`/`medium`/`low`, and file paths, JSON keys and code quoted from the diff
+are left alone — so the report still parses and the paths still resolve. `--language <name>`
+sets it for one run.
 
 **Skip paths.** A repository that also carries an installed copy of itself reviews the
 same source two or three times, and the duplicates spend the diff budget the original

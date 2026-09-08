@@ -1,6 +1,6 @@
 ---
 description: Check whether the local Gemini CLI is ready, walk through every setting with --init, toggle the stop-time review gate, set the default review base, raise the diff budget, skip directories, or make reviews always list the files they covered
-argument-hint: '[--init] [--verify] [--enable-review-gate|--disable-review-gate] [--set-review-base <ref>|--clear-review-base] [--enable-show-files|--disable-show-files] [--set-max-diff-bytes <size>|--clear-max-diff-bytes] [--set-exclude <paths>|--clear-exclude] [--set-max-untracked-bytes <size>] [--set-max-untracked-total <size>|--clear-untracked-limits]'
+argument-hint: '[--init] [--verify] [--enable-review-gate|--disable-review-gate] [--set-review-base <ref>|--clear-review-base] [--enable-show-files|--disable-show-files] [--set-max-diff-bytes <size>|--clear-max-diff-bytes] [--set-exclude <paths>|--clear-exclude] [--set-max-untracked-bytes <size>] [--set-max-untracked-total <size>|--clear-untracked-limits] [--set-language <name>|--clear-language]'
 allowed-tools: Bash(node:*), Bash(npm:*), AskUserQuestion
 ---
 
