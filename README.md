@@ -84,7 +84,7 @@ Both review commands take the same flags and accept focus text after them.
 | `--multi[=<lens,...>]` | Run three narrow passes instead of one and merge the findings |
 | `--model <alias>` | Pick a model (see the aliases below) |
 | `--show-reasoning` | Include Gemini's reasoning trace |
-| `--show-files` | List the files the review actually covered, and any it did not |
+| `--show-files` | Also list the files the review covered (the ones it missed are always listed) |
 | `--max-diff-bytes <size>` | Raise the truncation budget for this run (`512kb`, `1mb`, or raw bytes) |
 | `--exclude <paths>` / `--no-exclude` | Skip these paths for this run, or review everything despite the setting |
 | `--max-untracked-bytes <size>` | Raise the per-file limit on new (untracked) file content |
@@ -107,8 +107,8 @@ An auto-detected base spanning more than 40 files is flagged, since that usually
 range is much wider than the change you meant to review.
 
 A diff over the budget is sent in part, and the report names the budget it hit.
-`--show-files` turns that warning into two explicit lists — what the review covered, and
-what it never saw. The budget is 256 KB by default; raise it per run with
+Every report lists what it never saw, with the reason. `--show-files` adds the full list of
+what it did cover. The budget is 256 KB by default; raise it per run with
 `--max-diff-bytes 512kb`, or for the workspace with
 `/gemini:setup --set-max-diff-bytes 512kb`.
 
@@ -206,7 +206,9 @@ The ref is resolved when you set it, so a typo fails immediately. Each git workt
 workspace, and a worktree with no base of its own inherits the main checkout's. A pinned base
 only supplies the ref for a branch review — uncommitted changes still take precedence.
 
-**Always list covered files.** Turn `--show-files` on for every review in this workspace,
+**Always list covered files.** A report always names the files it missed and the paths held
+back by configuration, because that is the part worth catching. The full list of covered
+files is off by default. Turn `--show-files` on for every review in this workspace,
 so a truncated run names what it missed without you remembering the flag:
 
 ```bash

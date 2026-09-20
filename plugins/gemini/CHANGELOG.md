@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.16.0
+
+- Every review report now lists the files it never reached, with the reason, and the paths
+  held back by configuration. Both were behind `--show-files`, which defaults to off — so
+  the one thing this machinery exists to catch was invisible unless someone had already
+  turned on a switch they had no reason to look for.
+- `--show-files` now controls only the full list of files the review did cover. That list is
+  noise on an ordinary run, and it stays opt-in.
+
 ## 1.15.0
 
 - Reviews can be written in another language. `/gemini:setup --set-language Chinese` for a

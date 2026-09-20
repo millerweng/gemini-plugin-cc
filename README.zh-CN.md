@@ -82,7 +82,7 @@
 | `--multi[=<lens,...>]` | 分三路窄范围跑，再把 findings 合并 |
 | `--model <alias>` | 指定模型，别名见下面 |
 | `--show-reasoning` | 输出里带上 Gemini 的推理过程 |
-| `--show-files` | 列出这次 review 实际覆盖了哪些文件，以及哪些没覆盖到 |
+| `--show-files` | 额外列出本次 Review 覆盖了哪些文件（没覆盖到的一律会列出）|
 | `--max-diff-bytes <size>` | 只对这次抬高截断上限（`512kb`、`1mb`，或者直接给字节数）|
 | `--exclude <paths>` / `--no-exclude` | 只对这次跳过这些路径，或者无视配置把全部内容都 review |
 | `--max-untracked-bytes <size>` | 抬高新增（untracked）文件的单文件上限 |
@@ -104,7 +104,7 @@
 自动检测出的 base 如果覆盖超过 40 个文件，输出里会标出来。这通常说明范围比你想 review 的改动大得多。
 
 diff 超过预算时只会发一部分，报告里会写明撞的是哪个预算。
-加 `--show-files` 就把这句话变成两份明确的清单：这次看了哪些文件，哪些没看到。
+报告一律会列出没看到的文件，并写明原因。加 `--show-files` 才会补上看过的那份完整清单。
 
 预算默认 256 KB。单次抬高用 `--max-diff-bytes 512kb`，
 整个 workspace 用 `/gemini:setup --set-max-diff-bytes 512kb`。
@@ -262,8 +262,10 @@ untracked 文件是整份内容发过去的，不是 diff，所以有自己的�
 
 一步一步往上调。prompt 大太多的话，可能整个 turn 都花在推理上、最后什么都不返回 —— 那比一次「明说自己截断了」的 review 更糟。
 
-**让 review 一直列出覆盖了哪些文件。** 在这个 workspace 里把 `--show-files` 设成常开，
-这样截断的时候不用你记得加参数，报告自己就会写明漏了什么：
+**让 Review 一直列出覆盖了哪些文件。** 报告一律会写明漏掉了哪些文件、以及哪些路径被配置排除了，
+因为这两项才是需要被发现的部分。看过的那份完整清单默认不打印。
+
+在本 workspace 里把 `--show-files` 设成常开：
 
 ```bash
 /gemini:setup --enable-show-files   # 用 --disable-show-files 撤销

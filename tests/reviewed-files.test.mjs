@@ -178,3 +178,27 @@ test("truncation and a size cap are reported as different reasons", () => {
   assert.match(byFile.get("tracked.js"), /budget/, "the tracked file lost to the diff budget");
   assert.match(byFile.get("untracked-big.py"), /per-file limit/, "the untracked one hit the size cap");
 });
+
+// 本清单是整套检查的价值所在：一次 Review 少看了两个文件，读者只有在这里才看得见。
+// 把它藏在一个默认关闭的开关后面，等于这套检查没做。
+test("files the review never reached are listed without --show-files", async () => {
+  const { renderReviewResult } = await import("../plugins/gemini/scripts/lib/render.mjs");
+  const output = renderReviewResult(
+    { parsed: { verdict: "approve", summary: "Fine.", findings: [] }, rawOutput: "{}", parseError: null },
+    {
+      reviewLabel: "Review",
+      targetLabel: "working tree diff",
+      reviewedFiles: ["a.js"],
+      omittedFiles: ["big.py"],
+      omittedFileDetails: [{ file: "big.py", reason: "over the per-file limit" }],
+      excludePatterns: [".claude"],
+      excludedFiles: ["x", "y"]
+    }
+  );
+
+  assert.match(output, /Files NOT reviewed \(1\)/);
+  assert.match(output, /- big\.py \(over the per-file limit\)/);
+  assert.match(output, /Deliberately excluded: \.claude/);
+  // 完整清单是噪音，仍然由开关控制。
+  assert.doesNotMatch(output, /Files reviewed \(/);
+});

@@ -413,11 +413,10 @@ function appendFailedLensOutput(lines, lensRuns) {
 // it from the diff stat. The reviewed list is the changed set minus whatever never
 // reached the prompt, so on a truncated run the two lists together account for every
 // changed file.
+// 漏掉的文件和被排除的文件一律打印，不受 --show-files 控制。这两段是本机制唯一的价值
+// 所在：一次 Review 少看了两个文件，读者只有在这里才看得见。把它们藏在一个默认关闭的
+// 开关后面，等于这套检查没做。--show-files 只管那份完整清单，那份是噪音，不是信号。
 function appendReviewedFilesSection(lines, meta) {
-  if (!meta.showFiles) {
-    return;
-  }
-
   const reviewed = Array.isArray(meta.reviewedFiles) ? meta.reviewedFiles : [];
   const omitted = Array.isArray(meta.omittedFiles) ? meta.omittedFiles : [];
 
@@ -436,12 +435,14 @@ function appendReviewedFilesSection(lines, meta) {
     );
   }
 
-  lines.push("", `Files reviewed (${reviewed.length}):`);
-  if (reviewed.length === 0) {
-    lines.push("- (none — no file diff reached Gemini)");
-  } else {
-    for (const file of reviewed) {
-      lines.push(`- ${file}`);
+  if (meta.showFiles) {
+    lines.push("", `Files reviewed (${reviewed.length}):`);
+    if (reviewed.length === 0) {
+      lines.push("- (none — no file diff reached Gemini)");
+    } else {
+      for (const file of reviewed) {
+        lines.push(`- ${file}`);
+      }
     }
   }
 
