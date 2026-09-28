@@ -281,6 +281,19 @@ worktree 的继承规则和 review base 一样。worktree 自己关掉的，就�
 
 **任务超时。** 默认 30 分钟。改法：`export GEMINI_TASK_TIMEOUT_MS=3600000`。
 
+**自动重试。** Gemini 有时候接下 Prompt 之后就一声不吭，原因是 Gemini CLI 把上游故障
+（403、连接中断、配额耗尽）自己吞掉了，正在背地里重试。本插件等待 5 分钟仍然收不到
+第一个数据块，就放弃这一次，换一个全新的 Gemini 会话重来，最多尝试 3 次，每次重试都
+写进任务日志。两条限制保证重试不会帮倒忙：已经流出过任何数据的运行一律不重试（它可能
+已经调用过工具、改过文件），重试也修不好的失败（例如权限被拒）立刻失败而不是把三次
+机会耗光。握手和建会话另有 2 分钟期限，因此启动阶段挂住不会再永远停在 `starting`。
+
+| 变量 | 默认值 | 管什么 |
+| --- | --- | --- |
+| `GEMINI_FIRST_CHUNK_TIMEOUT_MS` | 300000 | 发出 Prompt 到第一个数据块之间的沉默 |
+| `GEMINI_HANDSHAKE_TIMEOUT_MS` | 120000 | ACP 握手和建立会话 |
+| `GEMINI_TURN_RETRY_ATTEMPTS` | 3 | 总尝试次数，含重试 |
+
 **认证。** 配在 `~/.gemini/settings.json` 的 `selectedType` 里：
 
 - `oauth-personal`：先在终端里跑一次 `gemini` 完成授权

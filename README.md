@@ -281,6 +281,22 @@ companion script by hand writes to a temp fallback the plugin never reads back.
 
 **Task timeout.** 30 minutes by default: `export GEMINI_TASK_TIMEOUT_MS=3600000`.
 
+**Automatic retry.** Gemini sometimes accepts a prompt and then goes silent, because the
+CLI swallowed an upstream failure (403, a dropped connection, exhausted quota) and is
+retrying behind your back. The plugin gives up waiting after 5 minutes without a single
+chunk and starts the run again on a fresh Gemini session, up to 3 attempts, announcing
+each retry on the job log. Two guards keep this from making things worse: a run that has
+already streamed anything is never retried, because it may have called tools or edited
+files; and a failure that a retry cannot fix, such as a permission denial, fails right
+away instead of burning all three attempts. The handshake and `session/new` carry their
+own 2-minute deadline, so a wedged startup can no longer sit at `starting` forever.
+
+| Variable | Default | What it bounds |
+| --- | --- | --- |
+| `GEMINI_FIRST_CHUNK_TIMEOUT_MS` | 300000 | Silence between the prompt and the first chunk |
+| `GEMINI_HANDSHAKE_TIMEOUT_MS` | 120000 | The ACP handshake and opening a session |
+| `GEMINI_TURN_RETRY_ATTEMPTS` | 3 | Total attempts, retries included |
+
 **Auth.** Configured in `~/.gemini/settings.json`, by `selectedType`: `oauth-personal` (run
 `gemini` once interactively), `gemini-api-key` or `google-api-key` (plus the matching env var),
 `vertex-ai` (plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`), or `gateway`.

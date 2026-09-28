@@ -208,7 +208,9 @@ function pushJobDetails(lines, job, options = {}) {
     );
   } else if (options.showElapsed && job.stalled) {
     lines.push(
-      `  Liveness: nothing new in the log for ${job.lastUpdate}, so the run may be stuck. Check the log below, and cancel it if it stays silent.`
+      // 插件自己会在 5 分钟没有第一个数据块时换一个会话重来，所以这里不再叫人去取消。
+      // 叫人取消反而会砍掉一次马上就要发生的自动重试。
+      `  Liveness: nothing new in the log for ${job.lastUpdate}. A run that never produced anything is restarted automatically on a fresh Gemini session, and each retry is written to the log below, so wait for that line before cancelling.`
     );
   } else if (options.showElapsed && job.lastUpdate) {
     lines.push("  Liveness: the log is still growing, so Gemini is working.");

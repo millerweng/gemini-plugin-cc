@@ -27,12 +27,136 @@ export const DEFAULT_CONTINUE_PROMPT =
 
 const DEFAULT_TASK_TIMEOUT_MS = 30 * 60 * 1000;
 
-function resolveTaskTimeoutMs() {
-  const raw = process.env.GEMINI_TASK_TIMEOUT_MS;
-  if (!raw) return DEFAULT_TASK_TIMEOUT_MS;
+// Gemini 有时候接下 Prompt 之后就一声不吭：上游 API 返回 403、网络中断、配额耗尽，
+// Gemini CLI 自己把错误吞掉并静默重试，ACP 这一侧什么都收不到。本机 889 次真实运行的
+// 统计是，从 Session ready 到第一个数据块，中位数 13 秒，p99 是 197 秒；而沉默超过
+// 10 分钟的 8 次运行全部以失败告终。所以「迟迟等不到第一个数据块」是一个可靠的故障
+// 信号，不必等整轮超时（默认 30 分钟）才发现。
+const DEFAULT_FIRST_CHUNK_TIMEOUT_MS = 5 * 60 * 1000;
+// 握手和建会话这两步此前完全没有超时保护。client.request() 只在子进程退出时才 Reject，
+// 因此 initialize 或 session/new 一旦挂住，任务会永远停在 starting 阶段。
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 2 * 60 * 1000;
+const DEFAULT_TURN_RETRY_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = 5000;
+
+function resolvePositiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TASK_TIMEOUT_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return parsed;
+}
+
+function resolveTaskTimeoutMs() {
+  return resolvePositiveIntEnv("GEMINI_TASK_TIMEOUT_MS", DEFAULT_TASK_TIMEOUT_MS);
+}
+
+function resolveFirstChunkTimeoutMs() {
+  return resolvePositiveIntEnv("GEMINI_FIRST_CHUNK_TIMEOUT_MS", DEFAULT_FIRST_CHUNK_TIMEOUT_MS);
+}
+
+function resolveHandshakeTimeoutMs() {
+  return resolvePositiveIntEnv("GEMINI_HANDSHAKE_TIMEOUT_MS", DEFAULT_HANDSHAKE_TIMEOUT_MS);
+}
+
+function resolveTurnRetryAttempts() {
+  return resolvePositiveIntEnv("GEMINI_TURN_RETRY_ATTEMPTS", DEFAULT_TURN_RETRY_ATTEMPTS);
+}
+
+// 这些状态重试多少次都不会变，重试只是把同一次失败再等一遍。
+const PERMANENT_FAILURE_PATTERNS = [
+  /"code"\s*:\s*(400|401|403|404)\b/,
+  /PERMISSION_DENIED|UNAUTHENTICATED|IAM_PERMISSION_DENIED/i,
+  /api key not valid/i
+];
+
+// 这些状态是上游的临时故障，换一个连接重来一次通常就好了。
+const RETRYABLE_FAILURE_PATTERNS = [
+  /"code"\s*:\s*(408|409|429|500|502|503|504)\b/,
+  /RESOURCE_EXHAUSTED|UNAVAILABLE|DEADLINE_EXCEEDED|\bINTERNAL\b/,
+  /socket hang up/i,
+  /\b(ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EPIPE|EAI_AGAIN)\b/,
+  /fetch failed/i,
+  /request to \S+ failed/i,
+  /exited unexpectedly/i,
+  /connection closed/i
+];
+
+/**
+ * 判断一次失败该不该自动重试。
+ *
+ * 最重要的一条是 `error.streamed`：只要 Gemini 已经吐出过任何一个数据块，就不重试。
+ * 数据块意味着这一轮可能已经调用过工具、改过文件，重跑一遍等于把副作用做第二遍。
+ * 自动重试只在「这一轮什么都没产出」时才是安全的。
+ *
+ * 默认返回 permanent。认不出来的错误多半是本地的代码或配置问题，重试三次只会
+ * 把一个立刻可见的失败拖成三倍时长。
+ *
+ * @returns {"retry" | "permanent"}
+ */
+export function classifyTurnFailure(error) {
+  if (error?.streamed === true) {
+    return "permanent";
+  }
+  const text = [error?.code, error?.message, error?.geminiStderr].filter(Boolean).join("\n");
+  if (PERMANENT_FAILURE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return "permanent";
+  }
+  if (error?.retryable === true) {
+    return "retry";
+  }
+  return RETRYABLE_FAILURE_PATTERNS.some((pattern) => pattern.test(text)) ? "retry" : "permanent";
+}
+
+// 只有这些更新算「模型真的开始干活了」。
+//
+// 剩下两种更新绝不能算：`available_commands_update` 是 ACP 服务端在会话一建立就推送的
+// 命令清单，`user_message_chunk` 是 Prompt 本身的回显。两者都在几毫秒内到达，跟模型
+// 有没有响应毫无关系。把它们算进来，等第一个数据块的期限会被立刻清掉，整套机制等于
+// 没有。之前那些停在 starting 阶段几十分钟的任务，日志正好停在 Session ready，就是
+// 因为这两种更新不写日志，而真正的 agent_thought_chunk 一个都没来。
+const MODEL_OUTPUT_UPDATE_KINDS = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan"
+]);
+
+export function isModelOutputUpdate(kind) {
+  return MODEL_OUTPUT_UPDATE_KINDS.has(kind);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 给一个没有自带超时的 Promise 加上期限。
+ *
+ * `onAbandon` 用于在放弃等待之后收拾残局：被放弃的 Promise 仍然可能稍后成功，
+ * 如果它持有子进程之类的资源，必须在这里释放，否则每次超时都会漏掉一个 gemini 进程。
+ */
+async function withDeadline(promise, timeoutMs, message, onAbandon = null) {
+  let handle = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        handle = setTimeout(() => {
+          if (onAbandon) {
+            promise.then(onAbandon, () => {});
+          }
+          const error = new Error(`${message} (${Math.round(timeoutMs / 1000)}s)`);
+          error.code = "GEMINI_TIMEOUT";
+          error.retryable = true;
+          reject(error);
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (handle) clearTimeout(handle);
+  }
 }
 
 const GEMINI_SETTINGS_FILE = path.join(os.homedir(), ".gemini", "settings.json");
@@ -241,10 +365,19 @@ function completeTurn(state, stopReason, turn = null) {
 async function captureTurn(client, sessionId, startRequest, options = {}) {
   const state = createTurnCaptureState(sessionId, options);
   const previousHandler = client.notificationHandler;
+  let streamed = false;
+  let firstChunkHandle = null;
 
   client.setNotificationHandler((message) => {
     if (message.method === ACP_METHODS.prompt || message.method === "session/update") {
       if (message.params?.sessionId === state.sessionId) {
+        if (isModelOutputUpdate(message.params?.update?.sessionUpdate)) {
+          streamed = true;
+          if (firstChunkHandle) {
+            clearTimeout(firstChunkHandle);
+            firstChunkHandle = null;
+          }
+        }
         applySessionUpdate(state, message.params);
       } else if (previousHandler) {
         previousHandler(message);
@@ -266,31 +399,80 @@ async function captureTurn(client, sessionId, startRequest, options = {}) {
     }, timeoutMs);
   });
 
+  // 第一个数据块的期限比整轮超时短得多，因为它诊断的是另一件事：整轮超时说明这一轮做得
+  // 太久，而这里说明这一轮根本没有开始。后者可以安全地重来，前者不行。
+  const firstChunkTimeoutMs = options.firstChunkTimeoutMs ?? resolveFirstChunkTimeoutMs();
+  const firstChunkPromise = new Promise((_, reject) => {
+    firstChunkHandle = setTimeout(() => {
+      const error = new Error(
+        `Gemini accepted the prompt but sent nothing back for ${Math.round(firstChunkTimeoutMs / 1000)}s. Override with GEMINI_FIRST_CHUNK_TIMEOUT_MS.`
+      );
+      error.code = "GEMINI_SILENT_START";
+      error.retryable = true;
+      reject(error);
+    }, firstChunkTimeoutMs);
+  });
+
   try {
-    const response = await Promise.race([startRequest(), timeoutPromise]);
+    const response = await Promise.race([startRequest(), timeoutPromise, firstChunkPromise]);
     const stopReason = response?.stopReason ?? "end_turn";
     completeTurn(state, stopReason);
     return await state.completion;
   } catch (error) {
+    // 重试判定要靠这个标记：已经流出过数据块的一轮可能调过工具、改过文件，重跑等于把
+    // 副作用做第二遍。
+    if (error && typeof error === "object") {
+      error.streamed = streamed;
+    }
     if (!state.completed) {
       state.error = error;
       completeTurn(state, "error");
     }
     throw error;
   } finally {
+    if (firstChunkHandle) clearTimeout(firstChunkHandle);
     if (timeoutHandle) clearTimeout(timeoutHandle);
     client.setNotificationHandler(previousHandler ?? null);
   }
 }
 
+// Gemini 把失败的真正原因打在 stderr 上，而失败路径以前直接把这份缓冲丢掉了，于是一次
+// 403 到最后只剩下一句「turn exceeded timeout」。这里把它贴回错误上：重试判定要读它，
+// 读报告的人也要读它。
+function attachGeminiStderr(error, client) {
+  if (!error || typeof error !== "object" || !client) {
+    return error;
+  }
+  const stderr = cleanGeminiStderr(client.stderr);
+  if (!stderr || error.geminiStderr) {
+    return error;
+  }
+  error.geminiStderr = stderr;
+  const tail = stderr.split("\n").slice(-6).join("\n");
+  if (typeof error.message === "string" && !error.message.includes(tail)) {
+    error.message = `${error.message}\n${tail}`;
+  }
+  return error;
+}
+
+async function connectWithDeadline(cwd, options = {}) {
+  return withDeadline(
+    GeminiAcpClient.connect(cwd, options),
+    resolveHandshakeTimeoutMs(),
+    "Gemini did not finish the ACP handshake in time",
+    (client) => client?.close?.().catch(() => {})
+  );
+}
+
 async function withAcpClient(cwd, fn) {
   let client = null;
   try {
-    client = await GeminiAcpClient.connect(cwd);
+    client = await connectWithDeadline(cwd);
     const result = await fn(client);
     await client.close();
     return result;
   } catch (error) {
+    attachGeminiStderr(error, client);
     const brokerRequested =
       client?.transport === "broker" || Boolean(process.env[BROKER_ENDPOINT_ENV]);
     // A broker endpoint that answers but speaks another dialect is a foreign server —
@@ -323,9 +505,11 @@ async function withAcpClient(cwd, fn) {
 
     if (!shouldRetryDirect) throw error;
 
-    const directClient = await GeminiAcpClient.connect(cwd, { disableBroker: true });
+    const directClient = await connectWithDeadline(cwd, { disableBroker: true });
     try {
       return await fn(directClient);
+    } catch (directError) {
+      throw attachGeminiStderr(directError, directClient);
     } finally {
       await directClient.close();
     }
@@ -340,7 +524,13 @@ async function startSession(client, cwd, options = {}) {
   if (options.model) {
     params.modelId = options.model;
   }
-  const response = await client.request(ACP_METHODS.newSession, params);
+  // session/new 走的是 client.request()，而它只在子进程退出时才 Reject。没有这个期限，
+  // 一次挂住的建会话请求会让任务永远停在 starting 阶段。
+  const response = await withDeadline(
+    client.request(ACP_METHODS.newSession, params),
+    resolveHandshakeTimeoutMs(),
+    "Gemini did not open a session in time"
+  );
   await applySessionControls(client, response.sessionId, options);
   return response;
 }
@@ -354,7 +544,11 @@ async function loadSession(client, sessionId, cwd, options = {}) {
   if (options.model) {
     params.modelId = options.model;
   }
-  const response = await client.request(ACP_METHODS.loadSession, params);
+  const response = await withDeadline(
+    client.request(ACP_METHODS.loadSession, params),
+    resolveHandshakeTimeoutMs(),
+    "Gemini did not reopen the session in time"
+  );
   await applySessionControls(client, sessionId, options);
   return response ?? { sessionId };
 }
@@ -795,6 +989,13 @@ export function buildPersistentTaskThreadName(prompt) {
 // Turn execution
 // -----------------------------------------------------------------------------
 
+/**
+ * 自动重试一轮没有产出任何东西的运行。
+ *
+ * 每次重试都换一个全新的 Client 和会话，因为挂住的往往是 Gemini 子进程本身，复用它
+ * 没有意义。重试只发生在 classifyTurnFailure 判定为 retry 的失败上，其中最关键的
+ * 前提是这一轮一个数据块都没有流出来，详见该函数的说明。
+ */
 export async function runAcpTurn(cwd, options = {}) {
   const availability = getGeminiAvailability(cwd);
   if (!availability.available) {
@@ -803,6 +1004,35 @@ export async function runAcpTurn(cwd, options = {}) {
     );
   }
 
+  return retryTurn(() => runAcpTurnOnce(cwd, options), {
+    attempts: options.retryAttempts ?? resolveTurnRetryAttempts(),
+    onProgress: options.onProgress,
+    backoffMs: options.retryBackoffMs ?? RETRY_BACKOFF_MS
+  });
+}
+
+export async function retryTurn(run, options = {}) {
+  const attempts = Math.max(1, options.attempts ?? DEFAULT_TURN_RETRY_ATTEMPTS);
+  const backoffMs = options.backoffMs ?? RETRY_BACKOFF_MS;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run(attempt);
+    } catch (error) {
+      if (attempt >= attempts || classifyTurnFailure(error) !== "retry") {
+        throw error;
+      }
+      const waitMs = backoffMs * attempt;
+      emitProgress(
+        options.onProgress,
+        `Attempt ${attempt} of ${attempts} produced nothing (${shorten(error?.message, 120)}). Retrying with a fresh Gemini session in ${Math.round(waitMs / 1000)}s.`,
+        "starting"
+      );
+      await delay(waitMs);
+    }
+  }
+}
+
+async function runAcpTurnOnce(cwd, options = {}) {
   return withAcpClient(cwd, async (client) => {
     let sessionId;
 

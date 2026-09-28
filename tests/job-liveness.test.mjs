@@ -63,13 +63,16 @@ test("log activity outranks a stale updatedAt", () => {
   assert.equal(job.stalled, false, "a fresh log means the run is moving, whatever updatedAt says");
 });
 
-test("a silent log past the threshold is reported as possibly stuck", () => {
+test("a silent log past the threshold is reported, and points at the automatic retry", () => {
   const dir = makeTempDir("liveness-stall-");
   const job = enrichJob(runningJob({ logFile: writeLog(dir, "job.log", 9 * 60 * 1000) }));
 
   assert.equal(job.stalled, true);
   assert.equal(job.processAlive, true);
-  assert.match(renderJobStatusReport(job), /Liveness: nothing new in the log for .* may be stuck/);
+  const output = renderJobStatusReport(job);
+  assert.match(output, /Liveness: nothing new in the log for /);
+  // 插件自己会重来一次。这里叫人取消，等于砍掉一次马上就要发生的自动重试。
+  assert.match(output, /restarted automatically/);
 });
 
 test("a running job whose process is gone is reported as dead, not running", () => {
@@ -81,8 +84,8 @@ test("a running job whose process is gone is reported as dead, not running", () 
   assert.equal(job.processAlive, false);
   const output = renderJobStatusReport(job);
   assert.match(output, /died without writing a result/);
-  // The stall warning would understate it — a dead process is not "may be stuck".
-  assert.doesNotMatch(output, /may be stuck/);
+  // The stall warning would understate it — a dead process is not waiting on a retry.
+  assert.doesNotMatch(output, /restarted automatically/);
 });
 
 // Elapsed climbs from startedAt regardless, so it can never be the liveness signal.
