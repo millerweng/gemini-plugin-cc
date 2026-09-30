@@ -127,6 +127,27 @@ export function isModelOutputUpdate(kind) {
   return MODEL_OUTPUT_UPDATE_KINDS.has(kind);
 }
 
+/**
+ * 从一轮的返回里取出「这一轮到底是哪个模型答的」。
+ *
+ * Gemini 在 session/prompt 的返回里附带 `_meta.quota`，里面写明服务这一轮的模型和消耗的
+ * Token 数。此前这段信息被直接丢掉，于是「是不是某个模型的额度用完了」这种问题在任务日志
+ * 里根本无从查起。额度耗尽时 Gemini CLI 会悄悄换到备用模型，本行是唯一看得见这件事的地方。
+ */
+export function describeModelUsage(response) {
+  const usage = response?._meta?.quota;
+  const entries = Array.isArray(usage?.model_usage) ? usage.model_usage : [];
+  const parts = entries
+    .map((entry) => {
+      const model = typeof entry?.model === "string" ? entry.model.trim() : "";
+      if (!model) return null;
+      const input = Number(entry?.token_count?.input_tokens);
+      return Number.isFinite(input) ? `${model} (${input.toLocaleString("en-US")} input tokens)` : model;
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -257,6 +278,7 @@ function createTurnCaptureState(sessionId, options = {}) {
     rejectCompletion,
     completed: false,
     stopReason: null,
+    modelUsage: null,
     lastAgentMessage: "",
     agentMessageBuffer: "",
     thoughts: [],
@@ -416,6 +438,10 @@ async function captureTurn(client, sessionId, startRequest, options = {}) {
   try {
     const response = await Promise.race([startRequest(), timeoutPromise, firstChunkPromise]);
     const stopReason = response?.stopReason ?? "end_turn";
+    state.modelUsage = describeModelUsage(response);
+    if (state.modelUsage) {
+      emitProgress(options.onProgress, `Served by ${state.modelUsage}.`, null);
+    }
     completeTurn(state, stopReason);
     return await state.completion;
   } catch (error) {
@@ -439,11 +465,43 @@ async function captureTurn(client, sessionId, startRequest, options = {}) {
 // Gemini 把失败的真正原因打在 stderr 上，而失败路径以前直接把这份缓冲丢掉了，于是一次
 // 403 到最后只剩下一句「turn exceeded timeout」。这里把它贴回错误上：重试判定要读它，
 // 读报告的人也要读它。
-function attachGeminiStderr(error, client) {
+// 走 Broker 传输时，gemini 子进程属于 Broker 进程，本进程的 client.stderr 永远是空的，
+// Gemini 打出来的原因全在 Broker 的日志文件里。而这个文件会在 Broker 退出时被删掉，删之前
+// 没有任何人读过它。一次静默失败的真正原因就是这样丢掉的。
+const BROKER_LOG_TAIL_BYTES = 64 * 1024;
+
+function readBrokerLogTail(cwd, maxLines = 12) {
+  let handle = null;
+  try {
+    const logFile = loadBrokerSession(cwd)?.logFile;
+    if (!logFile) return "";
+    // 一个长会话的 Broker 日志可以涨到几十 MB，整份读进内存没有必要，需要的只是末尾。
+    handle = fs.openSync(logFile, "r");
+    const size = fs.fstatSync(handle).size;
+    const length = Math.min(size, BROKER_LOG_TAIL_BYTES);
+    const buffer = Buffer.allocUnsafe(length);
+    fs.readSync(handle, buffer, 0, length, size - length);
+    const lines = cleanGeminiStderr(buffer.toString("utf8")).split("\n").filter(Boolean);
+    return lines.slice(-maxLines).join("\n");
+  } catch {
+    return "";
+  } finally {
+    if (handle !== null) {
+      try {
+        fs.closeSync(handle);
+      } catch {
+        // 关不上就算了，进程马上就要报错退出。
+      }
+    }
+  }
+}
+
+function attachGeminiStderr(error, client, cwd = null) {
   if (!error || typeof error !== "object" || !client) {
     return error;
   }
-  const stderr = cleanGeminiStderr(client.stderr);
+  const stderr =
+    cleanGeminiStderr(client.stderr) || (client.transport === "broker" && cwd ? readBrokerLogTail(cwd) : "");
   if (!stderr || error.geminiStderr) {
     return error;
   }
@@ -472,7 +530,7 @@ async function withAcpClient(cwd, fn) {
     await client.close();
     return result;
   } catch (error) {
-    attachGeminiStderr(error, client);
+    attachGeminiStderr(error, client, cwd);
     const brokerRequested =
       client?.transport === "broker" || Boolean(process.env[BROKER_ENDPOINT_ENV]);
     // A broker endpoint that answers but speaks another dialect is a foreign server —
@@ -509,7 +567,7 @@ async function withAcpClient(cwd, fn) {
     try {
       return await fn(directClient);
     } catch (directError) {
-      throw attachGeminiStderr(directError, directClient);
+      throw attachGeminiStderr(directError, directClient, cwd);
     } finally {
       await directClient.close();
     }
@@ -1094,6 +1152,7 @@ async function runAcpTurnOnce(cwd, options = {}) {
       finalMessage: turnState.lastAgentMessage,
       reasoningSummary: turnState.thoughts,
       stopReason: turnState.stopReason,
+      modelUsage: turnState.modelUsage ?? null,
       error: turnState.error,
       stderr: cleanGeminiStderr(client.stderr),
       fileChanges: [...turnState.toolCalls.values()],

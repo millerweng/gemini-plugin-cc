@@ -297,6 +297,18 @@ own 2-minute deadline, so a wedged startup can no longer sit at `starting` forev
 | `GEMINI_HANDSHAKE_TIMEOUT_MS` | 120000 | The ACP handshake and opening a session |
 | `GEMINI_TURN_RETRY_ATTEMPTS` | 3 | Total attempts, retries included |
 
+**Which model actually answered.** Gemini names the serving model in every turn response, and
+it switches to a fallback model on its own once a quota is spent. The job log now records that
+line (`Served by gemini-3.5-flash (143,775 input tokens)`), so a run that quietly stopped using
+the model you expected is visible instead of being guesswork. When a run fails on the shared
+broker, the tail of the broker's own log is attached to the error, because that file holds
+Gemini's explanation and used to be deleted at teardown without anyone reading it.
+
+**Multi-lens runs stop early on a silent failure.** If one lens exhausts its retries without
+Gemini returning anything, the cause is upstream and the remaining lenses would repeat the same
+wait, so they are marked "not run" with the reason instead. A lens that produced output before
+failing does not stop the others, and finished lenses always keep their results.
+
 **Auth.** Configured in `~/.gemini/settings.json`, by `selectedType`: `oauth-personal` (run
 `gemini` once interactively), `gemini-api-key` or `google-api-key` (plus the matching env var),
 `vertex-ai` (plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`), or `gateway`.

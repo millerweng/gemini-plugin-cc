@@ -294,6 +294,16 @@ worktree 的继承规则和 review base 一样。worktree 自己关掉的，就�
 | `GEMINI_HANDSHAKE_TIMEOUT_MS` | 120000 | ACP 握手和建立会话 |
 | `GEMINI_TURN_RETRY_ATTEMPTS` | 3 | 总尝试次数，含重试 |
 
+**这一轮是哪个模型答的。** Gemini 在每一轮的返回里都写明了服务本轮的模型，而且某个模型的
+额度用完之后，它会自己换到备用模型。任务日志现在记下这一行（`Served by gemini-3.5-flash
+(143,775 input tokens)`），所以一次 Review 悄悄换了模型是看得见的，不必靠猜。运行失败时，
+如果走的是共享 Broker，Broker 自己的日志尾部会附在错误上。Gemini 的解释就在那个文件里，
+而它此前会在 Broker 退出时被删掉，删之前没有任何人读过。
+
+**多路 Review 遇到静默失败会提前收工。** 某一路把重试次数用光却一个字都没拿到，说明故障在
+上游，剩下几路只会把同样的等待再重复一遍，因此它们直接标成「未执行」并写明原因。产出过内容
+再失败的那一路不会连累其他路，已经跑完的路也始终保留结果。
+
 **认证。** 配在 `~/.gemini/settings.json` 的 `selectedType` 里：
 
 - `oauth-personal`：先在终端里跑一次 `gemini` 完成授权

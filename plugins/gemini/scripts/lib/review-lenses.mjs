@@ -447,3 +447,17 @@ export function mergeLensReviews(runs) {
     failedLenses: lensRuns.filter((run) => !run.ok).map((run) => run.lens)
   };
 }
+
+/**
+ * 一路 Review 失败之后，还要不要接着跑剩下的路。
+ *
+ * 判据是「这一路把重试次数用光，却一个字都没拿到」。这种失败的根源在上游，不在这一路的
+ * 提示词里，后面每一路都会重复同样的等待。2026-09-30 的两次多路 Review 各跑了 47 分钟，
+ * 三路全空，就是这么来的。
+ *
+ * 产出过内容再失败的不算：那是这一路自己的问题，换一路仍然有机会成功，而且已经产出的
+ * 结果不该被后面的路连坐。
+ */
+export function shouldStopRemainingLenses(error) {
+  return error?.code === "GEMINI_SILENT_START" && error?.streamed !== true;
+}

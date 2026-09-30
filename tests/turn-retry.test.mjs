@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   classifyTurnFailure,
+  describeModelUsage,
   isModelOutputUpdate,
   retryTurn
 } from "../plugins/gemini/scripts/lib/gemini.mjs";
+import { shouldStopRemainingLenses } from "../plugins/gemini/scripts/lib/review-lenses.mjs";
 
 function failure(message, extra = {}) {
   return Object.assign(new Error(message), extra);
@@ -132,4 +134,40 @@ test("each retry is announced on the job log", async () => {
   );
   assert.equal(messages.length, 1);
   assert.match(messages[0], /Attempt 1 of 2/);
+});
+
+// 2026-09-30 的两次多路 Review 各跑了 47 分钟，三路全空：每一路都把三次重试和三次
+// 5 分钟的等待完整烧了一遍，而故障在上游，从第一路起就注定了。
+test("a lens that returned nothing stops the remaining lenses", () => {
+  const silent = failure("Gemini accepted the prompt but sent nothing back for 300s.", {
+    code: "GEMINI_SILENT_START",
+    streamed: false
+  });
+  assert.equal(shouldStopRemainingLenses(silent), true);
+});
+
+test("a lens that produced output before failing does not stop the others", () => {
+  // 这一路自己的问题，换一路仍然有机会成功。
+  const midway = failure("socket hang up", { code: "GEMINI_SILENT_START", streamed: true });
+  assert.equal(shouldStopRemainingLenses(midway), false);
+  assert.equal(shouldStopRemainingLenses(failure("socket hang up")), false);
+});
+
+// Gemini 在每一轮的返回里都写明了是哪个模型答的。额度耗尽时它会悄悄换到备用模型，
+// 而此前这段信息被直接丢掉，于是「是不是额度没了」在任务日志里根本无从查起。
+test("the serving model and token count are read off the turn response", () => {
+  const response = {
+    stopReason: "end_turn",
+    _meta: {
+      quota: {
+        model_usage: [{ model: "gemini-3.5-flash", token_count: { input_tokens: 143775 } }]
+      }
+    }
+  };
+  assert.equal(describeModelUsage(response), "gemini-3.5-flash (143,775 input tokens)");
+});
+
+test("a response without quota metadata reports nothing rather than guessing", () => {
+  assert.equal(describeModelUsage({ stopReason: "end_turn" }), null);
+  assert.equal(describeModelUsage(undefined), null);
 });

@@ -54,7 +54,13 @@ import {
   resolveShowReviewFiles,
   resolveUntrackedLimits
 } from "./lib/review-config.mjs";
-import { buildLensDirective, getLens, mergeLensReviews, resolveLensIds } from "./lib/review-lenses.mjs";
+import {
+  buildLensDirective,
+  getLens,
+  mergeLensReviews,
+  resolveLensIds,
+  shouldStopRemainingLenses
+} from "./lib/review-lenses.mjs";
 import {
   generateJobId,
   getConfig,
@@ -847,8 +853,27 @@ async function executeReviewRun(request) {
 // same broker session, and `--background` already covers not wanting to wait.
 async function executeMultiLensReviewRun({ context, request, target, reviewName, focusText, lensIds }) {
   const runs = [];
+  let abortReason = null;
   for (const lensId of lensIds) {
     const lens = getLens(lensId);
+    // 一路已经把重试次数用光却一个字都没拿到，说明故障在上游，不在这一路的提示词里。
+    // 后面几路必然是同样的下场，每一路还要再烧掉三次 5 分钟的等待。2026-09-30 的两次
+    // Review 就是这样各花了 47 分钟，最后三路全空。与其陪跑，不如把剩下的路标成未执行，
+    // 并说清楚原因。
+    if (abortReason) {
+      runs.push({
+        lens: lensId,
+        label: lens?.label ?? lensId,
+        status: 1,
+        threadId: null,
+        parsed: null,
+        parseError: `Not run: ${abortReason}`,
+        rawOutput: null,
+        reasoningSummary: null,
+        stderr: null
+      });
+      continue;
+    }
     try {
       const { result, parsed } = await runReviewPass(context, request, reviewName, focusText, lens);
       runs.push({
@@ -867,17 +892,23 @@ async function executeMultiLensReviewRun({ context, request, target, reviewName,
       // A rate limit or a dropped connection on the third pass must not throw away the
       // two that already finished and already cost their tokens. Record the failure as
       // a failed lens and keep going; the merge step reports partial results.
+      const message = error instanceof Error ? error.message : String(error);
       runs.push({
         lens: lensId,
         label: lens?.label ?? lensId,
         status: 1,
         threadId: null,
         parsed: null,
-        parseError: error instanceof Error ? error.message : String(error),
+        parseError: message,
         rawOutput: null,
         reasoningSummary: null,
         stderr: null
       });
+      // 只有「这一路什么都没产出」才停掉后面的路。产出过内容再失败的，故障是这一路自己的，
+      // 换一路仍然有机会成功。
+      if (shouldStopRemainingLenses(error)) {
+        abortReason = `the ${lens?.label ?? lensId} lens exhausted its retries without Gemini returning anything, so the remaining lenses were skipped rather than repeating the same wait (${shorten(message, 120)})`;
+      }
     }
   }
 
